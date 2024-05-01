@@ -26,7 +26,7 @@ class BaseLikelihoodTestCase(BaseTestCase):
         if 'Normal' in self.__class__.__name__.split('Likelihood')[0]:
             return MultivariateNormal(torch.randn(*batch_shape, 5), mat @ mat.transpose(-1, -2) + eye)
         elif 'QExponential' in self.__class__.__name__.split('Likelihood')[0]:
-            return MultivariateQExponential(torch.randn(*batch_shape, 5), mat @ mat.transpose(-1, -2) + eye, torch.tensor(1.0))
+            return MultivariateQExponential(torch.randn(*batch_shape, 5), mat @ mat.transpose(-1, -2) + eye, torch.tensor(self._power if hasattr(self, '_power') else 2.0))
 
     def _create_targets(self, batch_shape=torch.Size()):
         return torch.randn(*batch_shape, 5)

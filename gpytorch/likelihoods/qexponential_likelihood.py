@@ -13,7 +13,7 @@ from .. import settings
 from ..constraints import Interval
 from ..distributions import base_distributions, QExponential, MultivariateQExponential
 from ..priors import Prior
-from ..utils.warnings import GPInputWarning
+from ..utils.warnings import QEPInputWarning
 from .likelihood import Likelihood
 from .noise_models import FixedNoise, HomoskedasticNoise, Noise
 
@@ -34,6 +34,7 @@ class _QExponentialLikelihoodBase(Likelihood):
             )
 
         self.noise_covar = noise_covar
+        self.power = kwargs.pop('power', torch.tensor(2.0))
 
     def _shaped_noise_covar(self, base_shape: torch.Size, *params: Any, **kwargs: Any) -> Union[Tensor, LinearOperator]:
         return self.noise_covar(*params, shape=base_shape, **kwargs)
@@ -61,11 +62,11 @@ class _QExponentialLikelihoodBase(Likelihood):
             missing = torch.isnan(target)
             target = settings.observation_nan_policy._fill_tensor(target)
 
-        mean, variance = input.mean, input.variance
+        mean, variance, power = input.mean, input.variance, self.power
         trace_plus_inv_quad_form = ((target - mean).square() + variance) / noise
-        res = trace_plus_inv_quad_form**(input.power/2.) + noise.log() + math.log(2 * math.pi)
+        res = trace_plus_inv_quad_form**(power/2.) + noise.log() + math.log(2 * math.pi)
         res = res.mul(-0.5)
-        if input.power!=2: res += 0.5 * (input.power/2.-1) * trace_plus_inv_quad_form.log() + torch.log(input.power/2.) # exact value is intractable; only lower bound is provided.
+        if power!=2: res += 0.5 * (power/2.-1) * trace_plus_inv_quad_form.log() + torch.log(power/2.) # exact value is intractable; only lower bound is provided.
 
         if nan_policy == "fill":
             res = res * ~missing
@@ -79,7 +80,7 @@ class _QExponentialLikelihoodBase(Likelihood):
 
     def forward(self, function_samples: Tensor, *params: Any, **kwargs: Any) -> QExponential:
         noise = self._shaped_noise_covar(function_samples.shape, *params, **kwargs).diagonal(dim1=-1, dim2=-2)
-        return QExponential(function_samples, noise.sqrt(), kwargs.pop('power',torch.tensor(1.0)))
+        return QExponential(function_samples, noise.sqrt(), self.power)
 
     def log_marginal(
         self, observations: Tensor, function_dist: MultivariateQExponential, *params: Any, **kwargs: Any
@@ -116,10 +117,10 @@ class _QExponentialLikelihoodBase(Likelihood):
         return res
 
     def marginal(self, function_dist: MultivariateQExponential, *params: Any, **kwargs: Any) -> MultivariateQExponential:
-        mean, covar, power = function_dist.mean, function_dist.lazy_covariance_matrix, function_dist.power
+        mean, covar = function_dist.mean, function_dist.lazy_covariance_matrix
         noise_covar = self._shaped_noise_covar(mean.shape, *params, **kwargs)
         full_covar = covar + noise_covar
-        return function_dist.__class__(mean, full_covar, power)
+        return function_dist.__class__(mean, full_covar, self.power)
 
 
 class QExponentialLikelihood(_QExponentialLikelihoodBase):
@@ -156,7 +157,7 @@ class QExponentialLikelihood(_QExponentialLikelihoodBase):
         noise_covar = HomoskedasticNoise(
             noise_prior=noise_prior, noise_constraint=noise_constraint, batch_shape=batch_shape
         )
-        super().__init__(noise_covar=noise_covar)
+        super().__init__(noise_covar=noise_covar, **kwargs)
 
     @property
     def noise(self) -> Tensor:
@@ -286,7 +287,7 @@ class FixedNoiseQExponentialLikelihood(_QExponentialLikelihoodBase):
         batch_shape: Optional[torch.Size] = torch.Size(),
         **kwargs: Any,
     ) -> None:
-        super().__init__(noise_covar=FixedNoise(noise=noise))
+        super().__init__(noise_covar=FixedNoise(noise=noise), **kwargs)
 
         self.second_noise_covar: Optional[HomoskedasticNoise] = None
         if learn_additional_noise:
@@ -351,7 +352,7 @@ class FixedNoiseQExponentialLikelihood(_QExponentialLikelihoodBase):
             warnings.warn(
                 "You have passed data through a FixedNoiseQExponentialLikelihood that did not match the size "
                 "of the fixed noise, *and* you did not specify noise. This is treated as a no-op.",
-                GPInputWarning,
+                QEPInputWarning,
             )
 
         return res

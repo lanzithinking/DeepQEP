@@ -43,8 +43,9 @@ class _MultitaskQExponentialLikelihoodBase(_QExponentialLikelihoodBase):
         rank: int = 0,
         task_correlation_prior: Optional[Prior] = None,
         batch_shape: torch.Size = torch.Size(),
+        **kwargs: Any,
     ) -> None:
-        super().__init__(noise_covar=noise_covar)
+        super().__init__(noise_covar=noise_covar, **kwargs)
         if rank != 0:
             if rank > num_tasks:
                 raise ValueError(f"Cannot have rank ({rank}) greater than num_tasks ({num_tasks})")
@@ -198,8 +199,10 @@ class MultitaskQExponentialLikelihood(_MultitaskQExponentialLikelihoodBase):
         noise_constraint: Optional[Interval] = None,
         has_global_noise: bool = True,
         has_task_noise: bool = True,
+        **kwargs: Any,
     ) -> None:
         super(Likelihood, self).__init__()  # pyre-ignore[20]
+        self.power = kwargs.pop('power', torch.tensor(2.0))
         if noise_constraint is None:
             noise_constraint = GreaterThan(1e-4)
 

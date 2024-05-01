@@ -16,15 +16,16 @@ from gpytorch.likelihoods.noise_models import FixedNoise
 from gpytorch.priors import GammaPrior
 from gpytorch.test.base_likelihood_test_case import BaseLikelihoodTestCase
 
+POWER = 2.0
 
 class TestQExponentialLikelihood(BaseLikelihoodTestCase, unittest.TestCase):
-    seed = 0
+    seed = 0; _power = POWER
 
     def create_likelihood(self):
-        return QExponentialLikelihood()
+        return QExponentialLikelihood(power=torch.tensor(POWER))
 
     def test_pickle_with_prior(self):
-        likelihood = QExponentialLikelihood(noise_prior=GammaPrior(1, 1))
+        likelihood = QExponentialLikelihood(noise_prior=GammaPrior(1, 1), power=torch.tensor(POWER))
         pickle.loads(pickle.dumps(likelihood))  # Should be able to pickle and unpickle with a prior
 
 
@@ -32,7 +33,7 @@ class TestQExponentialLikelihoodBatch(TestQExponentialLikelihood):
     seed = 0
 
     def create_likelihood(self):
-        return QExponentialLikelihood(batch_shape=torch.Size([3]))
+        return QExponentialLikelihood(batch_shape=torch.Size([3]), power=torch.tensor(POWER))
 
     def test_nonbatch(self):
         pass
@@ -42,7 +43,7 @@ class TestQExponentialLikelihoodMultiBatch(TestQExponentialLikelihood):
     seed = 0
 
     def create_likelihood(self):
-        return QExponentialLikelihood(batch_shape=torch.Size([2, 3]))
+        return QExponentialLikelihood(batch_shape=torch.Size([2, 3]), power=torch.tensor(POWER))
 
     def test_nonbatch(self):
         pass
@@ -52,15 +53,18 @@ class TestQExponentialLikelihoodMultiBatch(TestQExponentialLikelihood):
 
 
 class TestFixedNoiseQExponentialLikelihood(BaseLikelihoodTestCase, unittest.TestCase):
+    _power = POWER
     def create_likelihood(self):
         noise = 0.1 + torch.rand(5)
-        return FixedNoiseQExponentialLikelihood(noise=noise)
+        power = torch.tensor(POWER)
+        return FixedNoiseQExponentialLikelihood(noise=noise, power=power)
 
     def test_fixed_noise_qexponential_likelihood(self, cuda=False):
         device = torch.device("cuda") if cuda else torch.device("cpu")
         for dtype in (torch.float, torch.double):
             noise = 0.1 + torch.rand(4, device=device, dtype=dtype)
-            lkhd = FixedNoiseQExponentialLikelihood(noise=noise)
+            power = torch.tensor(POWER, device=device, dtype=dtype)
+            lkhd = FixedNoiseQExponentialLikelihood(noise=noise, power=power)
             # test basics
             self.assertIsInstance(lkhd.noise_covar, FixedNoise)
             self.assertTrue(torch.equal(noise, lkhd.noise))
@@ -70,7 +74,6 @@ class TestFixedNoiseQExponentialLikelihood(BaseLikelihoodTestCase, unittest.Test
             # test __call__
             mean = torch.zeros(4, device=device, dtype=dtype)
             covar = DiagLinearOperator(torch.ones(4, device=device, dtype=dtype))
-            power = torch.tensor(1.0, device=device, dtype=dtype)
             qep = MultivariateQExponential(mean, covar, power)
             out = lkhd(qep)
             self.assertTrue(torch.allclose(out.variance, 1 + new_noise))
@@ -87,25 +90,29 @@ class TestFixedNoiseQExponentialLikelihood(BaseLikelihoodTestCase, unittest.Test
             # test noise smaller than min_fixed_noise
             expected_min_noise = settings.min_fixed_noise.value(dtype)
             noise[:2] = 0
-            lkhd = FixedNoiseQExponentialLikelihood(noise=noise)
+            lkhd = FixedNoiseQExponentialLikelihood(noise=noise, power=power)
             expected_noise = noise.clone()
             expected_noise[:2] = expected_min_noise
             self.assertTrue(torch.allclose(lkhd.noise, expected_noise))
 
 
 class TestFixedNoiseQExponentialLikelihoodBatch(BaseLikelihoodTestCase, unittest.TestCase):
+    _power = POWER
     def create_likelihood(self):
         noise = 0.1 + torch.rand(3, 5)
-        return FixedNoiseQExponentialLikelihood(noise=noise)
+        power = torch.tensor(POWER)
+        return FixedNoiseQExponentialLikelihood(noise=noise, power=power)
 
     def test_nonbatch(self):
         pass
 
 
 class TestFixedNoiseQExponentialLikelihoodMultiBatch(BaseLikelihoodTestCase, unittest.TestCase):
+    _power = POWER
     def create_likelihood(self):
         noise = 0.1 + torch.rand(2, 3, 5)
-        return FixedNoiseQExponentialLikelihood(noise=noise)
+        power = torch.tensor(POWER)
+        return FixedNoiseQExponentialLikelihood(noise=noise, power=power)
 
     def test_nonbatch(self):
         pass
@@ -115,10 +122,12 @@ class TestFixedNoiseQExponentialLikelihoodMultiBatch(BaseLikelihoodTestCase, uni
 
 
 class TestDirichletClassificationLikelihood(BaseLikelihoodTestCase, unittest.TestCase):
+    _power = POWER
     def create_likelihood(self):
         train_x = torch.randn(15)
         labels = torch.round(train_x).long()
-        likelihood = DirichletClassificationLikelihood(labels)
+        power = torch.tensor(POWER)
+        likelihood = DirichletClassificationLikelihood(labels, power=power)
         return likelihood
 
     def test_batch(self):
@@ -135,7 +144,8 @@ class TestDirichletClassificationLikelihood(BaseLikelihoodTestCase, unittest.Tes
         for dtype in (torch.float, torch.double):
             noise = torch.rand(6, device=device, dtype=dtype) > 0.5
             noise = noise.long()
-            lkhd = DirichletClassificationLikelihood(noise, dtype=dtype)
+            power = torch.tensor(POWER, device=device, dtype=dtype)
+            lkhd = DirichletClassificationLikelihood(noise, dtype=dtype, power=power)
             # test basics
             self.assertIsInstance(lkhd.noise_covar, FixedNoise)
             noise = torch.rand(6, device=device, dtype=dtype) > 0.5
@@ -146,14 +156,13 @@ class TestDirichletClassificationLikelihood(BaseLikelihoodTestCase, unittest.Tes
             # test __call__
             mean = torch.zeros(6, device=device, dtype=dtype)
             covar = DiagLinearOperator(torch.ones(6, device=device, dtype=dtype))
-            power = torch.tensor(1.0, device=device, dtype=dtype)
             qep = MultivariateQExponential(mean, covar, power)
             out = lkhd(qep)
             self.assertTrue(torch.allclose(out.variance, 1 + new_noise))
             # things should break if dimensions mismatch
             mean = torch.zeros(5, device=device, dtype=dtype)
             covar = DiagLinearOperator(torch.ones(5, device=device, dtype=dtype))
-            power = torch.tensor(1.0, device=device, dtype=dtype)
+            qep = MultivariateQExponential(mean, covar, power)
             with self.assertWarns(UserWarning):
                 lkhd(qep)
             # test __call__ w/ new targets
@@ -165,10 +174,10 @@ class TestDirichletClassificationLikelihood(BaseLikelihoodTestCase, unittest.Tes
 
 
 class TestQExponentialLikelihoodWithMissingObs(BaseLikelihoodTestCase, unittest.TestCase):
-    seed = 42
+    seed = 42; _power = POWER
 
     def create_likelihood(self):
-        return QExponentialLikelihood()
+        return QExponentialLikelihood(power=torch.tensor(POWER))
 
     def test_missing_value_inference_fill(self):
         """
@@ -213,7 +222,7 @@ class TestQExponentialLikelihoodWithMissingObs(BaseLikelihoodTestCase, unittest.
     def _make_data(self):
         mu = torch.zeros(2, 3)
         sigma = torch.tensor([[[1, 0.999, -0.999], [0.999, 1, -0.999], [-0.999, -0.999, 1]]] * 2).float()
-        power = torch.tensor(1.0)
+        power = torch.tensor(POWER)
         qep = MultivariateQExponential(mu, sigma, power)
         samples = qep.sample(torch.Size([10000]))  # qep samples
         noise_sd = 0.5
@@ -222,7 +231,7 @@ class TestQExponentialLikelihoodWithMissingObs(BaseLikelihoodTestCase, unittest.
         return qep, samples
 
     def _check_recovery(self, qep, samples):
-        likelihood = QExponentialLikelihood()
+        likelihood = QExponentialLikelihood(power=torch.tensor(POWER))
         opt = torch.optim.Adam(likelihood.parameters(), lr=0.05)
         for _ in range(100):
             opt.zero_grad()
