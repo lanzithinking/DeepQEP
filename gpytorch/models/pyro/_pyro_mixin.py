@@ -3,6 +3,7 @@
 import pyro
 import torch
 
+from .distributions import QExponential
 
 class _PyroMixin(object):
     def pyro_guide(self, input, beta=1.0, name_prefix=""):
@@ -14,9 +15,14 @@ class _PyroMixin(object):
 
         # Draw samples from q(f)
         function_dist = self(input, prior=False)
-        function_dist = pyro.distributions.Normal(loc=function_dist.mean, scale=function_dist.stddev).to_event(
-            len(function_dist.event_shape) - 1
-        )
+        if 'Normal' in input.__class__.__name__:
+            function_dist = pyro.distributions.Normal(loc=function_dist.mean, scale=function_dist.stddev).to_event(
+                len(function_dist.event_shape) - 1
+            )
+        elif 'QExponential' in input.__class__.__name__:
+            function_dist = QExponential(loc=function_dist.mean, scale=function_dist.stddev, power=function_dist.power).to_event(
+                len(function_dist.event_shape) - 1
+            )
         return function_dist.mask(False)
 
     def pyro_model(self, input, beta=1.0, name_prefix=""):
@@ -40,7 +46,12 @@ class _PyroMixin(object):
 
         # Draw samples from p(f)
         function_dist = self(input, prior=True)
-        function_dist = pyro.distributions.Normal(loc=function_dist.mean, scale=function_dist.stddev).to_event(
-            len(function_dist.event_shape) - 1
-        )
+        if 'Normal' in input.__class__.__name__:
+            function_dist = pyro.distributions.Normal(loc=function_dist.mean, scale=function_dist.stddev).to_event(
+                len(function_dist.event_shape) - 1
+            )
+        elif 'QExponential' in input.__class__.__name__:
+            function_dist = QExponential(loc=function_dist.mean, scale=function_dist.stddev, power=function_dist.power).to_event(
+                len(function_dist.event_shape) - 1
+            )
         return function_dist.mask(False)

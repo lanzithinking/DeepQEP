@@ -3,6 +3,7 @@
 try:
     from ._pyro_mixin import _PyroMixin
     from .pyro_gp import PyroGP
+    from .pyro_qep import PyroQEP
 except ImportError:
 
     class PyroGP(object):
@@ -20,4 +21,4 @@ except ImportError:
             raise RuntimeError("Cannot call `pyro_sample` because you dont have Pyro installed.")
 
 
-__all__ = ["PyroGP", "_PyroMixin"]
+__all__ = ["PyroGP", "_PyroMixin", "PyroQEP"]

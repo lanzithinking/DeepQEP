@@ -6,10 +6,12 @@ from torch.distributions import constraints, Chi2
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
 
+from .distribution import Distribution
+
 __all__ = ["QExponential"]
 
 
-class QExponential(ExponentialFamily):
+class QExponential(ExponentialFamily, Distribution):
     r"""
     Creates a q-exponential distribution parameterized by
     :attr:`loc`, :attr:`scale` and :attr:`power`.
