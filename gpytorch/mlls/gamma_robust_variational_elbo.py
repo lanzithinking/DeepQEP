@@ -5,7 +5,7 @@ import math
 import numpy as np
 import torch
 
-from ..likelihoods import _GaussianLikelihoodBase
+from ..likelihoods import _GaussianLikelihoodBase, _QExponentialLikelihoodBase
 from ._approximate_mll import _ApproximateMarginalLogLikelihood
 
 
@@ -36,10 +36,10 @@ class GammaRobustVariationalELBO(_ApproximateMarginalLogLikelihood):
     :math:`\beta` is a scaling constant for the KL divergence.
 
     .. note::
-        This module will only work with :obj:`~gpytorch.likelihoods.GaussianLikelihood`.
+        This module will only work with :obj:`~gpytorch.likelihoods.GaussianLikelihood` or :obj:`~gpytorch.likelihoods.QExponentialLikelihood`.
 
-    :param ~gpytorch.likelihoods.GaussianLikelihood likelihood: The likelihood for the model
-    :param ~gpytorch.models.ApproximateGP model: The approximate GP model
+    :param ~gpytorch.likelihoods.GaussianLikelihood (~gpytorch.likelihoods.QExponentialLikelihood) likelihood: The likelihood for the model
+    :param ~gpytorch.models.ApproximateGP (~gpytorch.models.ApproximateQEP) model: The approximate GP (QEP) model
     :param int num_data: The total number of training data points (necessary for SGD)
     :param float beta: (optional, default=1.) A multiplicative factor for the KL divergence term.
         Setting it to anything less than 1 reduces the regularization effect of the model
@@ -64,8 +64,8 @@ class GammaRobustVariationalELBO(_ApproximateMarginalLogLikelihood):
     """
 
     def __init__(self, likelihood, model, gamma=1.03, *args, **kwargs):
-        if not isinstance(likelihood, _GaussianLikelihoodBase):
-            raise RuntimeError("Likelihood must be Gaussian for exact inference")
+        if not isinstance(likelihood, (_GaussianLikelihoodBase, _QExponentialLikelihoodBase)):
+            raise RuntimeError("Likelihood must be Gaussian or Q-Exponential for exact inference")
         super().__init__(likelihood, model, *args, **kwargs)
         if gamma <= 1.0:
             raise ValueError("gamma should be > 1.0")
@@ -93,11 +93,12 @@ class GammaRobustVariationalELBO(_ApproximateMarginalLogLikelihood):
             - 0.5 * muf.pow(2.0) / varf
             + 0.5 * mut.pow(2.0) * sigmat
         )
+        # TODO: verify for Q-Exponential
 
         factor = log_tempered + shifted_gamma / self.gamma * log_integral
         factor = self.gamma * factor.exp()
 
-        # Do appropriate summation for multitask Gaussian likelihoods
+        # Do appropriate summation for multitask Gaussian (Q-Exponential) likelihoods
         num_event_dim = len(variational_dist_f.event_shape)
         if num_event_dim > 1:
             factor = factor.sum(list(range(-1, -num_event_dim, -1)))

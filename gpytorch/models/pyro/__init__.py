@@ -10,6 +10,10 @@ except ImportError:
         def __init__(self, *args, **kwargs):
             raise RuntimeError("Cannot use a PyroGP because you dont have Pyro installed.")
 
+    class PyroQEP(object):
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("Cannot use a PyroGP because you dont have Pyro installed.")
+
     class _PyroMixin(object):
         def pyro_factors(self, *args, **kwargs):
             raise RuntimeError("Cannot call `pyro_factors` because you dont have Pyro installed.")

@@ -23,9 +23,9 @@ class BaseLikelihoodTestCase(BaseTestCase):
     def _create_marginal_input(self, batch_shape=torch.Size()):
         mat = torch.randn(*batch_shape, 5, 5)
         eye = torch.diag_embed(torch.ones(*batch_shape, 5))
-        if 'Normal' in self.__class__.__name__.split('Likelihood')[0]:
+        if 'Gaussian' in self.__class__.__name__:
             return MultivariateNormal(torch.randn(*batch_shape, 5), mat @ mat.transpose(-1, -2) + eye)
-        elif 'QExponential' in self.__class__.__name__.split('Likelihood')[0]:
+        elif 'QExponential' in self.__class__.__name__:
             return MultivariateQExponential(torch.randn(*batch_shape, 5), mat @ mat.transpose(-1, -2) + eye, torch.tensor(self._power if hasattr(self, '_power') else 2.0))
 
     def _create_targets(self, batch_shape=torch.Size()):

@@ -21,9 +21,12 @@ class VariationalTestCase(BaseTestCase):
         distribution_cls=gpytorch.variational.CholeskyVariationalDistribution,
         constant_mean=True,
     ):
-        class _SVGPRegressionModel(gpytorch.models.ApproximateGP):
+        _power = self._power if hasattr(self, '_power') else 2.0
+        class _SV_PRegressionModel(gpytorch.models.ApproximateGP if _power==2 else gpytorch.models.ApproximateQEP):
             def __init__(self, inducing_points):
-                variational_distribution = distribution_cls(num_inducing, batch_shape=batch_shape)
+                if _power!=2: self.power = torch.tensor(_power)
+                variational_distribution = distribution_cls(num_inducing, batch_shape=batch_shape, power=self.power) if hasattr(self, 'power') \
+                                           else distribution_cls(num_inducing, batch_shape=batch_shape)
                 variational_strategy = strategy_cls(
                     self,
                     inducing_points,
@@ -41,11 +44,12 @@ class VariationalTestCase(BaseTestCase):
             def forward(self, x):
                 mean_x = self.mean_module(x)
                 covar_x = self.covar_module(x)
-                latent_pred = gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+                latent_pred = gpytorch.distributions.MultivariateQExponential(mean_x, covar_x, power=self.power) if hasattr(self, 'power') \
+                              else gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
                 return latent_pred
 
         inducing_points = torch.randn(num_inducing, 2).repeat(*inducing_batch_shape, 1, 1)
-        return _SVGPRegressionModel(inducing_points), self.likelihood_cls()
+        return _SV_PRegressionModel(inducing_points), self.likelihood_cls()
 
     def _training_iter(
         self,
@@ -132,7 +136,7 @@ class VariationalTestCase(BaseTestCase):
 
     @property
     def likelihood_cls(self):
-        return gpytorch.likelihoods.GaussianLikelihood
+        return gpytorch.likelihoods.GaussianLikelihood if self._power==2 else gpytorch.likelihoods.QExponentialLikelihood
 
     @abstractproperty
     def mll_cls(self):
@@ -331,7 +335,7 @@ class VariationalTestCase(BaseTestCase):
             fant_model = self._fantasy_iter(
                 model, likelihood, data_batch_shape, self.cuda, num_fant=num_fant, **cm_dict
             )
-            self.assertTrue(isinstance(fant_model, gpytorch.models.ExactGP))
+            self.assertTrue(isinstance(fant_model, {2.0: gpytorch.models.ExactGP, 1.0: gpytorch.models.ExactQEP}[self._power]))
 
             # we check to ensure setting the covar_module and mean_modules are okay
             if cm_dict["covar_module"] is None:

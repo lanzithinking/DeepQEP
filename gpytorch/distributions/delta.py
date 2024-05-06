@@ -8,6 +8,7 @@ from torch.distributions.kl import register_kl
 
 from .distribution import Distribution
 from .multivariate_normal import MultivariateNormal
+from .multivariate_qexponential import MultivariateQExponential
 
 try:
     from pyro.distributions import Delta
@@ -77,4 +78,9 @@ except ImportError:
 
 @register_kl(Delta, MultivariateNormal)
 def kl_mvn_mvn(p_dist, q_dist):
+    return -q_dist.log_prob(p_dist.mean)
+
+
+@register_kl(Delta, MultivariateQExponential)
+def kl_qep_qep(p_dist, q_dist):
     return -q_dist.log_prob(p_dist.mean)
