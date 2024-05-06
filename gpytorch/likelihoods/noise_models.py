@@ -134,7 +134,7 @@ class HeteroskedasticNoise(Noise):
                     output = self.noise_model(*params)
         finally:
             self.noise_model.train(training)
-        if not (isinstance(output, MultivariateNormal) or isinstance(output, MultivariateQExponential)):
+        if not isinstance(output, (MultivariateNormal, MultivariateQExponential)):
             raise NotImplementedError("Currently only noise models that return a MultivariateNormal or MultivariateQExponential are supported")
         # note: this also works with MultitaskMultivariateNormal (MultitaskMultivariateQExponential), where this
         # will return a batched DiagLinearOperators of size n x num_tasks x num_tasks

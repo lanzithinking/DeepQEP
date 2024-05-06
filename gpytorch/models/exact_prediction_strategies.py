@@ -25,7 +25,7 @@ from torch import Tensor
 
 from .. import settings
 
-from ..distributions import MultitaskMultivariateNormal
+from ..distributions import MultitaskMultivariateNormal, MultitaskMultivariateQExponential
 from ..lazy import LazyEvaluatedKernelTensor
 from ..utils.memoize import add_to_cache, cached, clear_cache_hook, pop_from_cache
 
@@ -122,7 +122,7 @@ class DefaultPredictionStrategy(object):
         Returns a new PredictionStrategy that incorporates the specified inputs and targets as new training data.
 
         This method is primary responsible for updating the mean and covariance caches. To add fantasy data to a
-        GP model, use the :meth:`~gpytorch.models.ExactGP.get_fantasy_model` method.
+        GP (QEP) model, use the :meth:`~gpytorch.models.ExactGP.get_fantasy_model` (:meth:`~gpytorch.models.ExactQEP.get_fantasy_model`) method.
 
         Args:
             inputs (Tensor `b1 x ... x bk x m x d` or `f x b1 x ... x bk x m x d`): Locations of fantasy
@@ -138,7 +138,7 @@ class DefaultPredictionStrategy(object):
             A `DefaultPredictionStrategy` model with `n + m` training examples, where the `m` fantasy examples have
             been added and all test-time caches have been updated.
         """
-        if not isinstance(full_output, MultitaskMultivariateNormal):
+        if not isinstance(full_output, (MultitaskMultivariateNormal, MultitaskMultivariateQExponential)):
             target_batch_shape = targets.shape[:-1]
         else:
             target_batch_shape = targets.shape[:-2]
@@ -149,7 +149,7 @@ class DefaultPredictionStrategy(object):
 
         num_train = self.num_train
 
-        if isinstance(full_output, MultitaskMultivariateNormal):
+        if isinstance(full_output, (MultitaskMultivariateNormal, MultitaskMultivariateQExponential)):
             num_tasks = full_output.event_shape[-1]
             full_mean = full_mean.view(*batch_shape, -1, num_tasks)
             fant_mean = full_mean[..., (num_train // num_tasks) :, :]
@@ -225,7 +225,7 @@ class DefaultPredictionStrategy(object):
             new_root = BatchRepeatLinearOperator(DenseLinearOperator(new_root), repeat_shape)
             # no need to repeat the covar cache, broadcasting will do the right thing
 
-        if isinstance(full_output, MultitaskMultivariateNormal):
+        if isinstance(full_output, (MultitaskMultivariateNormal, MultitaskMultivariateQExponential)):
             full_mean = full_mean.view(*target_batch_shape, -1, num_tasks).contiguous()
 
         # Create new DefaultPredictionStrategy object
@@ -325,7 +325,7 @@ class DefaultPredictionStrategy(object):
 
     def exact_predictive_mean(self, test_mean: Tensor, test_train_covar: LinearOperator) -> Tensor:
         """
-        Computes the posterior predictive covariance of a GP
+        Computes the posterior predictive covariance of a GP (QEP)
 
         :param Tensor test_mean: The test prior mean
         :param ~linear_operator.operators.LinearOperator test_train_covar:
@@ -367,7 +367,7 @@ class DefaultPredictionStrategy(object):
         self, test_test_covar: LinearOperator, test_train_covar: LinearOperator
     ) -> LinearOperator:
         """
-        Computes the posterior predictive covariance of a GP
+        Computes the posterior predictive covariance of a GP (QEP)
 
         :param ~linear_operator.operators.LinearOperator test_train_covar:
             Covariance matrix between test and train inputs

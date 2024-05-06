@@ -6,11 +6,11 @@ import torch
 from torch.nn import ModuleList
 
 from gpytorch.likelihoods import LikelihoodList
-from gpytorch.models import GP
+from gpytorch.models import GP, QEP
 from gpytorch.utils.generic import length_safe_zip
 
 
-class AbstractModelList(GP, ABC):
+class AbstractModelList(GP, QEP, ABC):
     def forward_i(self, i, *args, **kwargs):
         """Forward restricted to the i-th model only."""
         raise NotImplementedError
@@ -95,3 +95,6 @@ def _get_tensor_args(*args):
             yield (arg,)
         else:
             yield arg
+
+class UncorrelatedModelList(AbstractModelList):
+    pass
