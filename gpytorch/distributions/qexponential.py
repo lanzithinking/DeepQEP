@@ -4,6 +4,7 @@ from numbers import Number, Real
 import torch
 from torch.distributions import constraints, Chi2
 from torch.distributions.exp_family import ExponentialFamily
+from torch.distributions.kl import register_kl
 from torch.distributions.utils import _standard_normal, broadcast_all
 
 from .distribution import Distribution
@@ -124,3 +125,12 @@ class QExponential(ExponentialFamily, Distribution):
             return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)
         else:
             raise ValueError(f"Q-Exponential distribution with power {self.power} does not belong to exponential family!")
+
+
+@register_kl(QExponential, QExponential)
+def _kl_qexponential_qexponential(p, q, exact=False):
+    var_ratio = (p.scale / q.scale).pow(2)
+    t1 = ((p.loc - q.loc) / q.scale).pow(2)
+    res = 0.5 * ((var_ratio + t1).pow(q.power/2.) - 1 - var_ratio.log())
+    if q.power!=2: res += 0.5 * ( -(q.power/2.-1)*torch.log(var_ratio + t1) + (p.power/2.-1) * (-2./p.power*Chi2(1).entropy() if exact else 0) )
+    return res
