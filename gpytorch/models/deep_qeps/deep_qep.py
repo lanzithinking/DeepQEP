@@ -101,7 +101,7 @@ class DeepQEPLayer(ApproximateQEP):
         if self.output_dims is not None:
             mean = output.loc.transpose(-1, -2)
             covar = BlockDiagLinearOperator(output.lazy_covariance_matrix, block_dim=-3)
-            output = MultitaskMultivariateQExponential(mean, covar, power=inputs.power, interleaved=False)
+            output = MultitaskMultivariateQExponential(mean, covar, power=output.power, interleaved=False)
 
         # Maybe expand inputs?
         if deterministic_inputs:

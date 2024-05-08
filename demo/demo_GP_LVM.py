@@ -1,4 +1,4 @@
-"Showcase Q-Exponential Latent Variable Model"
+"Showcase Gaussian Latent Variable Model"
 
 import os
 import numpy as np

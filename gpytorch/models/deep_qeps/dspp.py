@@ -86,7 +86,7 @@ class DSPPLayer(DeepQEPLayer):
             if self.output_dims is not None and not isinstance(output, MultitaskMultivariateQExponential):
                 mean = output.loc.transpose(-1, -2)
                 covar = BlockDiagLinearOperator(output.lazy_covariance_matrix, block_dim=-3)
-                output = MultitaskMultivariateQExponential(mean, covar, interleaved=False)
+                output = MultitaskMultivariateQExponential(mean, covar, power=output.power, interleaved=False)
         else:
             output = output.loc.transpose(-1, -2)  # this layer provides noiseless kernel interpolation
 
