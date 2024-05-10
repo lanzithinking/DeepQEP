@@ -1,4 +1,4 @@
-"Showcase Deep Gaussian Process Model"
+"Showcase Deep Sigma Point Process Model"
 
 import os
 import math
@@ -16,8 +16,8 @@ from gpytorch.means import ConstantMean, LinearMean
 from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution, LMCVariationalStrategy
 from gpytorch.distributions import MultivariateNormal
-from gpytorch.models.deep_gps import DeepGPLayer, DeepGP
-from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
+from gpytorch.models.deep_gps.dspp import DSPPLayer, DSPP
+from gpytorch.mlls import DeepPredictiveLogLikelihood
 from gpytorch.likelihoods import MultitaskGaussianLikelihood
 
 # Setting manual seed for reproducibility
@@ -39,8 +39,8 @@ train_x = train_x.unsqueeze(-1)
 
 
 # Here's a simple standard layer
-class DGPHiddenLayer(DeepGPLayer):
-    def __init__(self, input_dims, output_dims, num_inducing=128, linear_mean=True):
+class DSPPHiddenLayer(DSPPLayer):
+    def __init__(self, input_dims, output_dims, num_inducing=128, linear_mean=True, Q=8):
         inducing_points = torch.randn(output_dims, num_inducing, input_dims)
         batch_shape = torch.Size([output_dims])
 
@@ -55,7 +55,7 @@ class DGPHiddenLayer(DeepGPLayer):
             learn_inducing_locations=True
         )
 
-        super().__init__(variational_strategy, input_dims, output_dims)
+        super().__init__(variational_strategy, input_dims, output_dims, Q)
         self.mean_module = ConstantMean() if linear_mean else LinearMean(input_dims)
         self.covar_module = ScaleKernel(
             MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
@@ -69,23 +69,24 @@ class DGPHiddenLayer(DeepGPLayer):
 
 # define the main model
 num_tasks = train_y.size(-1)
-num_hidden_dgp_dims = 3
+num_hidden_dspp_dims = 3
+num_quadrature_sites = 8
 
 
-class MultitaskDeepGP(DeepGP):
+class MultitaskDSPP(DSPP):
     def __init__(self, train_x_shape):
-        hidden_layer = DGPHiddenLayer(
+        hidden_layer = DSPPHiddenLayer(
             input_dims=train_x_shape[-1],
-            output_dims=num_hidden_dgp_dims,
+            output_dims=num_hidden_dspp_dims,
             linear_mean=True
         )
-        last_layer = DGPHiddenLayer(
+        last_layer = DSPPHiddenLayer(
             input_dims=hidden_layer.output_dims,
             output_dims=num_tasks,
             linear_mean=False
         )
 
-        super().__init__()
+        super().__init__(num_quadrature_sites)
 
         self.hidden_layer = hidden_layer
         self.last_layer = last_layer
@@ -111,13 +112,13 @@ class MultitaskDeepGP(DeepGP):
         return preds.mean.mean(0), preds.variance.mean(0)
 
 
-model = MultitaskDeepGP(train_x.shape)
+model = MultitaskDSPP(train_x.shape)
 
 
 # training
 model.train()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
-mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
+mll = DeepPredictiveLogLikelihood(model.likelihood, model, num_data=train_y.size(0))
 
 num_epochs = 1 if smoke_test else 200
 epochs_iter = tqdm.tqdm(range(num_epochs), desc="Epoch")
@@ -149,4 +150,4 @@ for task, ax in enumerate(axs):
 fig.tight_layout()
 
 # plt.show()
-plt.savefig('./demo_multi_DeepGP.png',bbox_inches='tight')
+plt.savefig('./demo_multi_DSPP.png',bbox_inches='tight')

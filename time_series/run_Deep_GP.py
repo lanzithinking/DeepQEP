@@ -1,4 +1,4 @@
-"Showcase Deep Gaussian Process Model"
+"Deep Gaussian Process Model"
 
 import os
 import math
@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.means import ConstantMean, LinearMean
-from gpytorch.kernels import MaternKernel, ScaleKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel
 from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution, LMCVariationalStrategy
 from gpytorch.distributions import MultivariateNormal
 from gpytorch.models.deep_gps import DeepGPLayer, DeepGP
@@ -21,18 +21,17 @@ from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
 from gpytorch.likelihoods import MultitaskGaussianLikelihood
 
 # Setting manual seed for reproducibility
-torch.manual_seed(73)
-# this is for running the notebook in our testing framework
-smoke_test = ('CI' in os.environ)
+torch.manual_seed(2024)
 
 # generate data
 train_x = torch.linspace(0, 1, 100)
 
+f = {'step': lambda ts: torch.tensor([1*(t>=0 and t<=1) + 0.5*(t>1 and t<=1.5) + 2*(t>1.5 and t<=2) for t in ts]),
+     'turning': lambda ts: torch.tensor([1.5*t*(t>=0 and t<=1) + (3.5-2*t)*(t>1 and t<=1.5) + (3*t-4)*(t>1.5 and t<=2) for t in ts])}
+
 train_y = torch.stack([
-    torch.sin(train_x * (2 * math.pi)) + torch.randn(train_x.size()) * 0.2,
-    torch.cos(train_x * (2 * math.pi)) + torch.randn(train_x.size()) * 0.2,
-    torch.sin(train_x * (2 * math.pi)) + 2 * torch.cos(train_x * (2 * math.pi)) + torch.randn(train_x.size()) * 0.2,
-    -torch.cos(train_x * (2 * math.pi)) + torch.randn(train_x.size()) * 0.2,
+    f['step'](train_x * 2) + torch.randn(train_x.size()) * 0.1,
+    f['turning'](train_x * 2) + torch.randn(train_x.size()) * 0.1,
 ], -1)
 
 train_x = train_x.unsqueeze(-1)
@@ -57,9 +56,19 @@ class DGPHiddenLayer(DeepGPLayer):
 
         super().__init__(variational_strategy, input_dims, output_dims)
         self.mean_module = ConstantMean() if linear_mean else LinearMean(input_dims)
+        # self.covar_module = ScaleKernel(
+        #     RBFKernel(
+        #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+        #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+        #         ), batch_shape=batch_shape, ard_num_dims=input_dims
+        #     )
+        # )
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-            batch_shape=batch_shape, ard_num_dims=None
+            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
+            batch_shape=batch_shape, ard_num_dims=None, 
+            lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+            )
         )
 
     def forward(self, x):
@@ -119,7 +128,8 @@ model.train()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
 
-num_epochs = 1 if smoke_test else 200
+loss_list = []
+num_epochs = 1000
 epochs_iter = tqdm.tqdm(range(num_epochs), desc="Epoch")
 for i in epochs_iter:
     optimizer.zero_grad()
@@ -128,7 +138,18 @@ for i in epochs_iter:
     epochs_iter.set_postfix(loss=loss.item())
     loss.backward()
     optimizer.step()
+    # record the loss and the best model
+    loss_list.append(loss.item())
+    if i==0:
+        min_loss = loss_list[-1]
+        optim_model = model.state_dict()
+    else:
+        if loss_list[-1] < min_loss:
+            min_loss = loss_list[-1]
+            optim_model = model.state_dict()
 
+# load the best model
+model.load_state_dict(optim_model)
 # Make predictions
 model.eval()
 with torch.no_grad(), gpytorch.settings.fast_pred_var():
@@ -138,15 +159,20 @@ with torch.no_grad(), gpytorch.settings.fast_pred_var():
     upper = mean + 2 * var.sqrt()
 
 # Plot results
-fig, axs = plt.subplots(1, num_tasks, figsize=(4 * num_tasks, 3))
+fig, axs = plt.subplots(1, num_tasks+1, figsize=(4 * (num_tasks+1), 4))
 for task, ax in enumerate(axs):
-    ax.plot(train_x.squeeze(-1).detach().numpy(), train_y[:, task].detach().numpy(), 'k*')
-    ax.plot(test_x.squeeze(-1).numpy(), mean[:, task].numpy(), 'b')
-    ax.fill_between(test_x.squeeze(-1).numpy(), lower[:, task].numpy(), upper[:, task].numpy(), alpha=0.5)
-    ax.set_ylim([-3, 3])
-    ax.legend(['Observed Data', 'Mean', 'Confidence'])
-    ax.set_title(f'Task {task + 1}')
+    if task < num_tasks:
+        ax.plot(test_x.squeeze(-1).numpy(), list(f.values())[task](test_x*2).numpy(), 'r--')
+        ax.plot(train_x.squeeze(-1).detach().numpy(), train_y[:, task].detach().numpy(), 'k*')
+        ax.plot(test_x.squeeze(-1).numpy(), mean[:, task].numpy(), 'b')
+        ax.fill_between(test_x.squeeze(-1).numpy(), lower[:, task].numpy(), upper[:, task].numpy(), alpha=0.5)
+        ax.set_ylim([-1, 3])
+        ax.legend(['Truth','Observed Data', 'Mean', 'Confidence'])
+        ax.set_title(f'Task {task + 1}: '+list(f.keys())[task]+' function')
+    else:
+        ax.plot(loss_list)
+        ax.set_title('Neg. ELBO Loss')
 fig.tight_layout()
 
 # plt.show()
-plt.savefig('./demo_multi_DeepGP.png',bbox_inches='tight')
+plt.savefig('./results/ts_DeepGP.png',bbox_inches='tight')

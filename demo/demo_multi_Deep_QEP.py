@@ -23,8 +23,7 @@ from gpytorch.likelihoods import MultitaskQExponentialLikelihood
 POWER = 1.0
 
 # Setting manual seed for reproducibility
-# torch.manual_seed(73)
-# np.random.seed(73)
+torch.manual_seed(73)
 # this is for running the notebook in our testing framework
 smoke_test = ('CI' in os.environ)
 
@@ -74,14 +73,14 @@ class DQEPHiddenLayer(DeepQEPLayer):
 
 # define the main model
 num_tasks = train_y.size(-1)
-num_hidden_dgp_dims = 3
+num_hidden_dqep_dims = 3
 
 
 class MultitaskDeepQEP(DeepQEP):
     def __init__(self, train_x_shape):
         hidden_layer = DQEPHiddenLayer(
             input_dims=train_x_shape[-1],
-            output_dims=num_hidden_dgp_dims,
+            output_dims=num_hidden_dqep_dims,
             linear_mean=True
         )
         last_layer = DQEPHiddenLayer(
