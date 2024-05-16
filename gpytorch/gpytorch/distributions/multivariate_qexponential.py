@@ -153,7 +153,7 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
         :return: A `*sample_shape x *batch_shape x N` tensor of m.i.u. standard Q-Exponential samples.
         """
         with torch.no_grad():
-            shape = self._extended_shape(sample_shape)
+            shape = self._extended_shape(sample_shape) if not hasattr(self, 'base_sample_shape_') else self.base_sample_shape_
             base_samples = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
             if self.power!=2: base_samples = torch.nn.functional.normalize(base_samples, dim=-1)*Chi2(shape[-1]).sample(shape[:-1]+torch.Size([1]))**(1./self.power)
             if rescale: base_samples /= torch.exp((2./self.power*math.log(2) - math.log(shape[-1]) + torch.lgamma(shape[-1]/2.+2./self.power) - math.lgamma(shape[-1]/2.))/2.)
@@ -240,19 +240,15 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
         :return: A `*sample_shape x *batch_shape x N` tensor of m.i.u. reparameterized samples.
         """
         covar = self.lazy_covariance_matrix
-        # if base_samples is None:
-        #     # Create some samples
-        #     num_samples = sample_shape.numel() or 1
-        #
-        #     # Get samples
-        #     res = covar.zero_mean_mvn_samples(num_samples) + self.loc.unsqueeze(0)
-        #     res = res.view(sample_shape + self.loc.shape)
-        #
-        if base_samples is not None:
-            sample_shape = base_samples.shape[: base_samples.dim() - self.loc.dim()]
-        else:
-            base_samples = self.get_base_samples(sample_shape)
         covar_root = covar.root_decomposition().root
+        if base_samples is None:
+            shape = self._extended_shape(sample_shape)
+            if covar_root.size(-1) < shape[-1]:
+                self.base_sample_shape_ = shape[:-1]+torch.Size([covar_root.size(-1)])
+            base_samples = self.get_base_samples(sample_shape)
+        else:
+            sample_shape = base_samples.shape[: base_samples.dim() - self.loc.dim()]
+        # covar_root = covar.root_decomposition().root
 
         # Make sure that the base samples agree with the distribution
         if (

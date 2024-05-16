@@ -7,7 +7,9 @@ import math
 from matplotlib import pyplot as plt
 
 import torch
-from tqdm.notebook import trange
+import tqdm#, logging
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger()
 
 # gpytorch imports
 import sys
@@ -28,6 +30,7 @@ torch.manual_seed(2024)
 
 # set device
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print('Using the '+device+' device...')
 
 # load CT data
 loaded=np.load(os.path.join('./','CT_obs_proj60.npz'),allow_pickle=True)
@@ -65,23 +68,24 @@ class DGPHiddenLayer(DeepGPLayer):
         #     )
         # )
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=None),#input_dims),
+            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=n),#input_dims),
             batch_shape=batch_shape, ard_num_dims=None, 
             lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
                 math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
             )
         )
         
-        # LatentVariable (c)
-        data_dim = output_dims; latent_dim = input_dims
-        latent_prior_mean = torch.zeros(n, latent_dim)
-        latent_prior = NormalPrior(latent_prior_mean, torch.ones_like(latent_prior_mean))
-        latent_init = torch.nn.Parameter(kwargs.pop('latent_init', torch.randn(latent_dim)))
-        self.latent_variable = VariationalLatentVariable(n, data_dim, latent_dim, latent_init, latent_prior)
-
-        # For (a) or (b) change to below:
-        # X = PointLatentVariable(n, latent_dim, latent_init)
-        # X = MAPLatentVariable(n, latent_dim, latent_init, latent_prior)
+        if 'latent_init' in kwargs:
+            # LatentVariable (c)
+            data_dim = output_dims; latent_dim = input_dims
+            latent_prior_mean = torch.zeros(n, latent_dim)
+            latent_prior = NormalPrior(latent_prior_mean, torch.ones_like(latent_prior_mean))
+            latent_init = torch.nn.Parameter(kwargs.pop('latent_init', torch.randn(latent_dim)))
+            self.latent_variable = VariationalLatentVariable(n, data_dim, latent_dim, latent_init, latent_prior)
+    
+            # For (a) or (b) change to below:
+            # X = PointLatentVariable(n, latent_dim, latent_init)
+            # X = MAPLatentVariable(n, latent_dim, latent_init, latent_prior)
 
     def forward(self, x, projection=None):
         x_ = x if projection is None else torch.matmul(x, projection.T)
@@ -99,7 +103,7 @@ class MultitaskDeepGP(DeepGP):
         hidden_layer = DGPHiddenLayer(
             input_dims=latent_dim,
             output_dims=num_hidden_dgp_dims,
-            linear_mean=False,
+            linear_mean=True,
             n=n,
             latent_init=torch.tensor(spsla.lsqr(A=proj, b=sinogram, damp=1.0)[0], dtype=torch.float32)
         )
@@ -107,7 +111,7 @@ class MultitaskDeepGP(DeepGP):
             input_dims=hidden_layer.output_dims,
             output_dims=num_tasks,
             linear_mean=False,
-            n=n
+            n=hidden_layer.output_dims
         )
 
         super().__init__()
@@ -151,15 +155,17 @@ model = model.to(device)
 mll = mll.to(device)
 
 loss_list = []
-num_epochs = 500
-iterator = trange(num_epochs, leave=True)
+num_epochs = 1000
+iterator = tqdm.tqdm(range(num_epochs), desc="Epoch")#, file=open(os.devnull, 'w'))
 for i in iterator:
     optimizer.zero_grad()
     sample = model.hidden_layer.latent_variable()
     if sample.ndim==1: sample = sample.unsqueeze(0)
     output = model(sample)
     loss = -mll(output, sinogram.T).sum()
+    # iterator.set_postfix(loss=loss.item())
     iterator.set_description('Loss: ' + str(float(np.round(loss.item(),2))) + ", iter no: " + str(i))
+    # logger.info(str(iterator) + 'Loss: ' + str(float(np.round(loss.item(),2))))
     loss.backward()
     optimizer.step()
     # record the loss and the best model

@@ -2,7 +2,7 @@
 
 #SBATCH -N 1            # number of nodes
 #SBATCH -c 1            # number of cores 
-#SBATCH --mem=64G       # amount of RAM requested in GiB (2^40)
+#SBATCH --mem=128G       # amount of RAM requested in GiB (2^40)
 #SBATCH -t 0-02:00:00   # time in d-hh:mm:ss
 #SBATCH -p general      # partition 
 #SBATCH -q public       # QOS
@@ -26,5 +26,5 @@ cd ~/Projects/Deep-QEP/code/CT
 
 # run python script
 
-python -u run_Deep_GP.py #> Deep_GP.log &
-# sbatch --job-name=DeepGP --output=Deep_GP.log CT_DGP_gpu.sh
+python -u run_GP_LVM.py #> GP_LVM.log &
+# sbatch --job-name=GPLVM --output=GP_LVM.log CT_GPLVM_gpu.sh

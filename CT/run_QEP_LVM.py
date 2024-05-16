@@ -14,7 +14,7 @@ sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.models.qeplvm.latent_variable import *
 from gpytorch.models.qeplvm.bayesian_qeplvm import BayesianQEPLVM
-from gpytorch.means import ZeroMean
+from gpytorch.means import ZeroMean, ConstantMean, LinearMean
 from gpytorch.mlls import VariationalELBO
 from gpytorch.priors import QExponentialPrior
 from gpytorch.likelihoods import QExponentialLikelihood
@@ -81,7 +81,7 @@ class bQEPLVM(BayesianQEPLVM):
         # self.mean_module = ZeroMean(ard_num_dims=latent_dim)
         # self.covar_module = ScaleKernel(RBFKernel(ard_num_dims=latent_dim))
         # Kernel (acting on transformed latent dimensions)
-        self.mean_module = ZeroMean(ard_num_dims=n)
+        self.mean_module = LinearMean(n)#ard_num_dims=n)
         self.covar_module = ScaleKernel(RBFKernel(ard_num_dims=n))
 
     def forward(self, X):

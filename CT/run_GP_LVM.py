@@ -6,7 +6,8 @@ import scipy.sparse.linalg as spsla
 import matplotlib.pylab as plt
 
 import torch
-from tqdm.notebook import trange
+import tqdm
+# from tqdm.notebook import trange
 
 # gpytorch imports
 import sys
@@ -14,7 +15,7 @@ sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.models.gplvm.latent_variable import *
 from gpytorch.models.gplvm.bayesian_gplvm import BayesianGPLVM
-from gpytorch.means import ZeroMean
+from gpytorch.means import ZeroMean, ConstantMean, LinearMean
 from gpytorch.mlls import VariationalELBO
 from gpytorch.priors import NormalPrior
 from gpytorch.likelihoods import GaussianLikelihood
@@ -73,11 +74,11 @@ class bGPLVM(BayesianGPLVM):
         super().__init__(X, q_f)
 
         # # Kernel (acting on latent dimensions)
-        # self.mean_module = ZeroMean(ard_num_dims=latent_dim)
+        # self.mean_module = ConstantMean(ard_num_dims=latent_dim)
         # self.covar_module = ScaleKernel(RBFKernel(ard_num_dims=latent_dim))
-        # Kernel (acting on transformed latent dimensions)
-        self.mean_module = ZeroMean(ard_num_dims=n)
-        self.covar_module = ScaleKernel(RBFKernel(ard_num_dims=n))
+        # # Kernel (acting on transformed latent dimensions)
+        self.mean_module = ConstantMean(ard_num_dims=data_dim)
+        self.covar_module = ScaleKernel(RBFKernel(ard_num_dims=data_dim))
 
     def forward(self, X):
         proj_X = torch.matmul(X, projector.T)
@@ -92,8 +93,9 @@ class bGPLVM(BayesianGPLVM):
         return np.sort(batch_indices)
 
 
-N = len(sinogram)
-data_dim = sinogram.shape[1]
+# N = len(sinogram)
+# data_dim = sinogram.shape[1]
+data_dim, N = sinogram.shape
 latent_dim = projector.shape[1] # data_dim
 n_inducing = 100
 lsqr = True
@@ -123,7 +125,9 @@ likelihood = likelihood.to(device)
 # using the optimizer provided.
 
 loss_list = []
-iterator = trange(1000, leave=True)
+num_epochs = 1000
+# iterator = trange(num_epochs, leave=True)
+iterator = tqdm.tqdm(range(num_epochs), desc="Epoch")
 for i in iterator:
     optimizer.zero_grad()
     sample = model.sample_latent_variable()  # a full sample returns latent x across all N
