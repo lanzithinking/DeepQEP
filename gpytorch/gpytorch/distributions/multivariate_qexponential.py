@@ -153,7 +153,7 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
         :return: A `*sample_shape x *batch_shape x N` tensor of m.i.u. standard Q-Exponential samples.
         """
         with torch.no_grad():
-            shape = self._extended_shape(sample_shape) if not hasattr(self, 'base_sample_shape_') else self.base_sample_shape_
+            shape = self._extended_shape(sample_shape)
             base_samples = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
             if self.power!=2: base_samples = torch.nn.functional.normalize(base_samples, dim=-1)*Chi2(shape[-1]).sample(shape[:-1]+torch.Size([1]))**(1./self.power)
             if rescale: base_samples /= torch.exp((2./self.power*math.log(2) - math.log(shape[-1]) + torch.lgamma(shape[-1]/2.+2./self.power) - math.lgamma(shape[-1]/2.))/2.)
@@ -240,46 +240,59 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
         :return: A `*sample_shape x *batch_shape x N` tensor of m.i.u. reparameterized samples.
         """
         covar = self.lazy_covariance_matrix
-        covar_root = covar.root_decomposition().root
         if base_samples is None:
-            shape = self._extended_shape(sample_shape)
-            if covar_root.size(-1) < shape[-1]:
-                self.base_sample_shape_ = shape[:-1]+torch.Size([covar_root.size(-1)])
-            base_samples = self.get_base_samples(sample_shape)
+            # Create some samples
+            num_samples = sample_shape.numel() or 1
+            
+            covar_base = covar.base_linear_op if hasattr(covar, 'base_linear_op') else covar
+            if covar_base.size()[-2:] == torch.Size([1, 1]):
+                covar_root = covar_base.to_dense().sqrt()
+            else:
+                covar_root = covar_base.root_decomposition().root
+            
+            base_samples = self.get_base_samples(torch.Size([num_samples]))
+            if len(self.event_shape)==2: base_samples = base_samples.transpose(-1,-2)
+            base_samples = base_samples.permute(*range(1,covar_base.dim()),0)
+            
+            # Get samples
+            res = covar_root.matmul(base_samples).permute(-1, *range(covar_base.dim() - 1)).contiguous()
+            if hasattr(covar, '_remove_batch_dim'): res = covar._remove_batch_dim(res.unsqueeze(-1)).squeeze(-1)
+            res += self.loc.unsqueeze(0)
+            res = res.view(sample_shape + self.loc.shape)
+        
         else:
+            covar_root = covar.root_decomposition().root
+    
+            # Make sure that the base samples agree with the distribution
+            if (
+                self.loc.shape != base_samples.shape[-self.loc.dim() :]
+                and covar_root.shape[-1] < base_samples.shape[-1]
+            ):
+                raise RuntimeError(
+                    "The size of base_samples (minus sample shape dimensions) should agree with the size "
+                    "of self.loc. Expected ...{} but got {}".format(self.loc.shape, base_samples.shape)
+                )
+    
+            # Determine what the appropriate sample_shape parameter is
             sample_shape = base_samples.shape[: base_samples.dim() - self.loc.dim()]
-        # covar_root = covar.root_decomposition().root
-
-        # Make sure that the base samples agree with the distribution
-        if (
-            self.loc.shape != base_samples.shape[-self.loc.dim() :]
-            and covar_root.shape[-1] < base_samples.shape[-1]
-        ):
-            raise RuntimeError(
-                "The size of base_samples (minus sample shape dimensions) should agree with the size "
-                "of self.loc. Expected ...{} but got {}".format(self.loc.shape, base_samples.shape)
-            )
-
-        # Determine what the appropriate sample_shape parameter is
-        # sample_shape = base_samples.shape[: base_samples.dim() - self.loc.dim()]
-
-        # Reshape samples to be batch_size x num_dim x num_samples
-        # or num_bim x num_samples
-        base_samples = base_samples.view(-1, *self.loc.shape[:-1], covar_root.shape[-1])
-        base_samples = base_samples.permute(*range(1, self.loc.dim() + 1), 0)
-
-        # Now reparameterize those base samples
-        # If necessary, adjust base_samples for rank of root decomposition
-        if covar_root.shape[-1] < base_samples.shape[-2]:
-            base_samples = base_samples[..., : covar_root.shape[-1], :]
-        elif covar_root.shape[-1] > base_samples.shape[-2]:
-            # raise RuntimeError("Incompatible dimension of `base_samples`")
-            covar_root = covar_root.transpose(-2, -1)
-        res = covar_root.matmul(base_samples) + self.loc.unsqueeze(-1)
-
-        # Permute and reshape new samples to be original size
-        res = res.permute(-1, *range(self.loc.dim())).contiguous()
-        res = res.view(sample_shape + self.loc.shape)
+    
+            # Reshape samples to be batch_size x num_dim x num_samples
+            # or num_bim x num_samples
+            base_samples = base_samples.view(-1, *self.loc.shape[:-1], covar_root.shape[-1])
+            base_samples = base_samples.permute(*range(1, self.loc.dim() + 1), 0)
+    
+            # Now reparameterize those base samples
+            # If necessary, adjust base_samples for rank of root decomposition
+            if covar_root.shape[-1] < base_samples.shape[-2]:
+                base_samples = base_samples[..., : covar_root.shape[-1], :]
+            elif covar_root.shape[-1] > base_samples.shape[-2]:
+                # raise RuntimeError("Incompatible dimension of `base_samples`")
+                covar_root = covar_root.transpose(-2, -1)
+            res = covar_root.matmul(base_samples) + self.loc.unsqueeze(-1)
+    
+            # Permute and reshape new samples to be original size
+            res = res.permute(-1, *range(self.loc.dim())).contiguous()
+            res = res.view(sample_shape + self.loc.shape)
 
         return res
 

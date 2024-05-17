@@ -364,7 +364,7 @@ class FixedNoiseQExponentialLikelihood(_QExponentialLikelihoodBase):
         return super().marginal(function_dist, *args, **kwargs)
 
 
-class DirichletClassificationLikelihood(FixedNoiseQExponentialLikelihood):
+class QExponentialDirichletClassificationLikelihood(FixedNoiseQExponentialLikelihood):
     r"""
     A classification likelihood that treats the labels as regression targets with fixed heteroscedastic noise.
     From Milios et al, NeurIPS, 2018 [https://arxiv.org/abs/1805.10915].

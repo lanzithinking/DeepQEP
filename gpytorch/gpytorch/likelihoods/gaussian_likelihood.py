@@ -467,3 +467,6 @@ class DirichletClassificationLikelihood(FixedNoiseGaussianLikelihood):
             new_noise, _, _ = self._prepare_targets(targets, dtype=dtype)
             kwargs["noise"] = new_noise
         return super().__call__(input, *args, **kwargs)
+
+class GaussianDirichletClassificationLikelihood(DirichletClassificationLikelihood):
+    pass

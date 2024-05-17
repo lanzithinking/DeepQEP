@@ -1,4 +1,4 @@
-"Showcase Gaussian Process Classification Model"
+"Showcase Q-Exponential Process Classification Model"
 
 import os
 import math
@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.models import ExactQEP
-from gpytorch.likelihoods.qexponential_likelihood import DirichletClassificationLikelihood
+from gpytorch.likelihoods.qexponential_likelihood import QExponentialDirichletClassificationLikelihood
 from gpytorch.means import ConstantMean
 from gpytorch.kernels import ScaleKernel, RBFKernel
 
@@ -26,7 +26,8 @@ def gen_data(num_data, seed = 2019):
 
     u = torch.rand(1)
     # data_fn = lambda x, y: 1 * torch.sin(0.15 * u * 3.1415 * (x + y)) + 1
-    data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.sqrt(x**2 + y**2)) + 1
+    # data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.sqrt(x**2 + y**2)) + 1
+    data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.abs(x) + np.abs(y)) + 1
     latent_fn = data_fn(x, y)
     z = torch.round(latent_fn).long().squeeze()
     return torch.cat((x,y),dim=1), z, data_fn
@@ -68,8 +69,8 @@ class DirichletQEPModel(ExactQEP):
         return gpytorch.distributions.MultivariateQExponential(mean_x, covar_x, power=torch.tensor(POWER))
 
 # initialize likelihood and model
-# we let the DirichletClassificationLikelihood compute the targets for us
-likelihood = DirichletClassificationLikelihood(train_y, learn_additional_noise=True, power=torch.tensor(POWER))
+# we let the QExponentialDirichletClassificationLikelihood compute the targets for us
+likelihood = QExponentialDirichletClassificationLikelihood(train_y, learn_additional_noise=True, power=torch.tensor(POWER))
 model = DirichletQEPModel(train_x, likelihood.transformed_targets, likelihood, num_classes=likelihood.num_classes)
 
 # this is for running the notebook in our testing framework
@@ -122,25 +123,26 @@ for i in range(3):
     ax[i].set_title("Logits: Class " + str(i), fontsize = 20)
 plt.savefig('./demo_QEP_cls_logits.png',bbox_inches='tight')
 
-# probabilities
-pred_samples = test_dist.sample(torch.Size((256,))).exp()
-probabilities = (pred_samples / pred_samples.sum(-2, keepdim=True)).mean(0)
-
-fig, ax = plt.subplots(1, 3, figsize = (15, 5))
-
-levels = np.linspace(0, 1.05, 20)
-for i in range(3):
-    im = ax[i].contourf(
-        test_x_mat.numpy(), test_y_mat.numpy(), probabilities[i].numpy().reshape((n_test,n_test)), levels=levels
-    )
-    fig.colorbar(im, ax=ax[i])
-    ax[i].set_title("Probabilities: Class " + str(i), fontsize = 20)
-plt.savefig('./demo_QEP_cls_probabilities.png',bbox_inches='tight')
+# # probabilities
+# pred_samples = test_dist.sample(torch.Size((256,))).exp()
+# probabilities = (pred_samples / pred_samples.sum(-2, keepdim=True)).mean(0)
+#
+# fig, ax = plt.subplots(1, 3, figsize = (15, 5))
+#
+# levels = np.linspace(0, 1.05, 20)
+# for i in range(3):
+#     im = ax[i].contourf(
+#         test_x_mat.numpy(), test_y_mat.numpy(), probabilities[i].numpy().reshape((n_test,n_test)), levels=levels
+#     )
+#     fig.colorbar(im, ax=ax[i])
+#     ax[i].set_title("Probabilities: Class " + str(i), fontsize = 20)
+# plt.savefig('./demo_QEP_cls_probabilities.png',bbox_inches='tight')
 
 # boundaries
 fig, ax = plt.subplots(1,2, figsize=(10, 5))
 
 ax[0].contourf(test_x_mat.numpy(), test_y_mat.numpy(), test_labels.numpy())
+ax[0].scatter(train_x[:,0].numpy(), train_x[:,1].numpy(), c = train_y)
 ax[0].set_title('True Response', fontsize=20)
 
 ax[1].contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(0)[1].reshape((n_test,n_test)))
