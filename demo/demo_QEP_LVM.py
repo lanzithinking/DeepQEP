@@ -32,12 +32,13 @@ np.random.seed(73)
 # this is for running the notebook in our testing framework
 smoke_test = ('CI' in os.environ)
 
-# download data
-url = "http://staffwww.dcs.shef.ac.uk/people/N.Lawrence/resources/3PhData.tar.gz"
-urllib.request.urlretrieve(url, '3PhData.tar.gz')
-with tarfile.open('3PhData.tar.gz', 'r') as f:
-    f.extract('DataTrn.txt')
-    f.extract('DataTrnLbls.txt')
+if not (os.path.exists('DataTrn.txt') and os.path.exists('DataTrnLbls.txt')):
+    # download data
+    url = "http://staffwww.dcs.shef.ac.uk/people/N.Lawrence/resources/3PhData.tar.gz"
+    urllib.request.urlretrieve(url, '3PhData.tar.gz')
+    with tarfile.open('3PhData.tar.gz', 'r') as f:
+        f.extract('DataTrn.txt')
+        f.extract('DataTrnLbls.txt')
 
 Y = torch.Tensor(np.loadtxt(fname='DataTrn.txt'))
 labels = torch.Tensor(np.loadtxt(fname='DataTrnLbls.txt'))
@@ -147,13 +148,13 @@ values, indices = torch.topk(model.covar_module.base_kernel.lengthscale, k=2,lar
 l1 = indices.numpy().flatten()[0]
 l2 = indices.numpy().flatten()[1]
 
-plt.figure(figsize=(20, 8))
+plt.figure(figsize=(20, 7))
 colors = ['r', 'b', 'g']
 
 plt.subplot(131)
 X = model.X.q_mu.detach().numpy()
 std = torch.nn.functional.softplus(model.X.q_log_sigma).detach().numpy()
-plt.title('2d latent subspace corresponding to 3 phase oilflow', fontsize='small')
+plt.title('2d latent subspace corresponding to 3 phase oilflow')
 plt.xlabel('Latent dim 1')
 plt.ylabel('Latent dim 2')
 
@@ -166,10 +167,10 @@ for i, label in enumerate(np.unique(labels)):
 
 plt.subplot(132)
 plt.bar(np.arange(latent_dim), height=inv_lengthscale.detach().numpy().flatten())
-plt.title('Inverse Lengthscale with SE-ARD kernel', fontsize='small')
+plt.title('Inverse Lengthscale with SE-ARD kernel')
 
 plt.subplot(133)
 plt.plot(loss_list, label='batch_size=100')
-plt.title('Neg. ELBO Loss', fontsize='small')
+plt.title('Neg. ELBO Loss')
 # plt.show()
 plt.savefig('./demo_QEP-LVM.png',bbox_inches='tight')

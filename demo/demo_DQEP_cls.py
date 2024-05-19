@@ -32,8 +32,7 @@ def gen_data(num_data, seed = 2019):
 
     u = torch.rand(1)
     # data_fn = lambda x, y: 1 * torch.sin(0.15 * u * 3.1415 * (x + y)) + 1
-    # data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.sqrt(x**2 + y**2)) + 1
-    data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.abs(x) + np.abs(y)) + 1
+    data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.sqrt(x**2 + y**2)) + 1
     latent_fn = data_fn(x, y)
     z = torch.round(latent_fn).long().squeeze()
     return torch.cat((x,y),dim=1), z, data_fn
@@ -148,7 +147,6 @@ for i in range(training_iter):
     optimizer.zero_grad()
     # Output from model
     output = model(train_x)
-    sample = output.sample(torch.Size((25,)))
     # Calc loss and backprop gradients
     loss = -mll(output, model.likelihood.transformed_targets.T).sum()
     loss.backward()

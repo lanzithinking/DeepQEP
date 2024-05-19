@@ -405,7 +405,7 @@ class MultitaskFixedNoiseGaussianLikelihood(_MultitaskGaussianLikelihoodBase):
             shape = None
         else:
             # here shape[:-1] is the batch shape requested, and shape[-1] is `n`, the number of points
-            shape = torch.Size(torch.tensor(base_shape)[[0,2,1]])
+            shape = base_shape[:-2]+base_shape[-2:][::-1]
 
         res = self.noise_covar(*params, shape=shape, **kwargs)
 

@@ -1,4 +1,4 @@
-"Showcase Deep Gaussian Process Classification Model"
+"Deep Sigma Point Process Classification Model"
 
 import os
 import math
@@ -17,8 +17,8 @@ from gpytorch.means import ConstantMean, LinearMean
 from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution
 from gpytorch.distributions import MultivariateNormal
-from gpytorch.models.deep_gps import DeepGPLayer, DeepGP, DeepLikelihood
-from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
+from gpytorch.models.deep_gps.dspp import DSPPLayer, DSPP
+from gpytorch.mlls import DeepPredictiveLogLikelihood
 from gpytorch.likelihoods import MultitaskDirichletClassificationLikelihood
 
 
@@ -31,14 +31,13 @@ def gen_data(num_data, seed = 2019):
 
     u = torch.rand(1)
     # data_fn = lambda x, y: 1 * torch.sin(0.15 * u * 3.1415 * (x + y)) + 1
-    data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.sqrt(x**2 + y**2)) + 1
+    # data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.sqrt(x**2 + y**2)) + 1
+    data_fn = lambda x, y: 1 * torch.cos(0.4 * u * np.pi * np.abs(x) + np.abs(y)) + 1
     latent_fn = data_fn(x, y)
     z = torch.round(latent_fn).long().squeeze()
     return torch.cat((x,y),dim=1), z, data_fn
 n_train = 500
 train_x, train_y, genfn = gen_data(n_train)
-# plt.scatter(train_x[:,0].numpy(), train_x[:,1].numpy(), c = train_y)
-# plt.show()
 
 # testing data
 n_test = 50
@@ -52,13 +51,22 @@ test_x = torch.cat((test_x_mat.view(-1,1), test_y_mat.view(-1,1)),dim=1)
 test_labels = torch.round(genfn(test_x_mat, test_y_mat))
 test_y = test_labels.view(-1)
 
-# # show true boundary
+# # plot data with true boundary
+# sys.path.append('../')
+# from util.gpmkr_scatter import gpmkr_scatter
+# os.makedirs('./results', exist_ok=True)
+# mkrs = ['^', 'o', 'v']
+# fig = plt.figure(figsize=(5, 5))
 # plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), test_labels.numpy())
+# gpmkr_scatter(train_x[:,0].numpy(), train_x[:,1].numpy(), m = [mkrs[int(i)] for i in train_y], facecolors='none', edgecolors='r')
+# plt.title('True Labels', fontsize=20)
+# plt.savefig('./results/cls_truth.png',bbox_inches='tight')
 # plt.show()
 
+
 # Here's a simple standard layer
-class DGPHiddenLayer(DeepGPLayer):
-    def __init__(self, input_dims, output_dims, num_inducing=128, linear_mean=True):
+class DSPPHiddenLayer(DSPPLayer):
+    def __init__(self, input_dims, output_dims, num_inducing=128, linear_mean=True, Q=8):
         inducing_points = torch.randn(output_dims, num_inducing, input_dims)
         batch_shape = torch.Size([output_dims])
 
@@ -73,11 +81,14 @@ class DGPHiddenLayer(DeepGPLayer):
             learn_inducing_locations=True
         )
 
-        super().__init__(variational_strategy, input_dims, output_dims)
+        super().__init__(variational_strategy, input_dims, output_dims, Q)
         self.mean_module = ConstantMean() if linear_mean else LinearMean(input_dims)
         self.covar_module = ScaleKernel(
             MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-            batch_shape=batch_shape, ard_num_dims=None
+            batch_shape=batch_shape, ard_num_dims=None, 
+            lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+            )
         )
 
     def forward(self, x):
@@ -86,22 +97,23 @@ class DGPHiddenLayer(DeepGPLayer):
         return MultivariateNormal(mean_x, covar_x)
 
 # define the main model
-num_hidden_dgp_dims = 2
+num_hidden_dspp_dims = 2
+num_quadrature_sites = 8
 
-class DirichletDeepGP(DeepGP):
+class DirichletDSPP(DSPP):
     def __init__(self, train_x, train_y, likelhood, num_classes):
-        hidden_layer = DGPHiddenLayer(
+        hidden_layer = DSPPHiddenLayer(
             input_dims=train_x.shape[-1],
-            output_dims=num_hidden_dgp_dims,
+            output_dims=num_hidden_dspp_dims,
             linear_mean=True
         )
-        last_layer = DGPHiddenLayer(
+        last_layer = DSPPHiddenLayer(
             input_dims=hidden_layer.output_dims,
             output_dims=num_classes,
             linear_mean=False
         )
 
-        super().__init__()
+        super().__init__(num_quadrature_sites)
 
         self.hidden_layer = hidden_layer
         self.last_layer = last_layer
@@ -128,11 +140,9 @@ class DirichletDeepGP(DeepGP):
 
 # we let the DirichletClassificationLikelihood compute the targets for us
 likelihood = MultitaskDirichletClassificationLikelihood(train_y, learn_additional_noise=True)
-model = DirichletDeepGP(train_x, likelihood.transformed_targets, likelihood, num_classes=likelihood.num_classes)
+likelihood.has_global_noise = True
+model = DirichletDSPP(train_x, likelihood.transformed_targets, likelihood, num_classes=likelihood.num_classes)
 
-# this is for running the notebook in our testing framework
-smoke_test = ('CI' in os.environ)
-training_iter = 2 if smoke_test else 500
 
 # Find optimal model hyperparameters
 model.train()
@@ -142,9 +152,9 @@ model.train()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
 
 # "Loss" for GPs - the marginal log likelihood
-mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
-# mll = DeepLikelihood(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
+mll = DeepPredictiveLogLikelihood(model.likelihood, model, num_data=train_y.size(0))
 
+training_iter = 500
 for i in range(training_iter):
     # Zero gradients from previous iteration
     optimizer.zero_grad()
@@ -170,39 +180,32 @@ with gpytorch.settings.fast_pred_var(), torch.no_grad():
 
     pred_means = test_dist.mean.mean(0)
 
-# logits
-fig, ax = plt.subplots(1, 3, figsize = (15, 5))
+# plots
+os.makedirs('./results', exist_ok=True)
 
-for i in range(3):
-    im = ax[i].contourf(
+# logits
+fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
+sub_figs = [None]*len(axes.flat)
+for i,ax in enumerate(axes.flat):
+    plt.axes(ax)
+    sub_figs[i]=plt.contourf(
         test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
     )
-    fig.colorbar(im, ax=ax[i])
-    ax[i].set_title("Logits: Class " + str(i), fontsize = 20)
-plt.savefig('./demo_DGP_cls_logits.png',bbox_inches='tight')
+    ax.set_title("Logits: Class " + str(i), fontsize = 20)
+    ax.set_aspect('auto')
+    plt.axis([-3, 3, -3, 3])
+# set color bar
+# cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
+# plt.colorbar(sub_fig, cax=cax, **kw)
+sys.path.append('../')
+from util.common_colorbar import common_colorbar
+fig=common_colorbar(fig,axes,sub_figs)
+plt.subplots_adjust(wspace=0.1, hspace=0.2)
+plt.savefig('./results/cls_DSPP_logits.png',bbox_inches='tight')
 
-# # probabilities
-# pred_samples = test_dist.sample(torch.Size((256,))).exp()
-# probabilities = (pred_samples / pred_samples.sum(-2, keepdim=True)).mean((0,1))
-#
-# fig, ax = plt.subplots(1, 3, figsize = (15, 5))
-#
-# levels = np.linspace(0, 1.05, 20)
-# for i in range(3):
-#     im = ax[i].contourf(
-#         test_x_mat.numpy(), test_y_mat.numpy(), probabilities[:,i].numpy().reshape((n_test,n_test)), levels=levels
-#     )
-#     fig.colorbar(im, ax=ax[i])
-#     ax[i].set_title("Probabilities: Class " + str(i), fontsize = 20)
-# plt.savefig('./demo_DGP_cls_probabilities.png',bbox_inches='tight')
 
 # boundaries
-fig, ax = plt.subplots(1,2, figsize=(10, 5))
-
-ax[0].contourf(test_x_mat.numpy(), test_y_mat.numpy(), test_labels.numpy())
-ax[0].scatter(train_x[:,0].numpy(), train_x[:,1].numpy(), c = train_y)
-ax[0].set_title('True Response', fontsize=20)
-
-ax[1].contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
-ax[1].set_title('Estimated Response', fontsize=20)
-plt.savefig('./demo_DGP_cls_boundaries.png',bbox_inches='tight')
+fig = plt.figure(figsize=(5, 5))
+plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
+plt.title('DSPP', fontsize=20)
+plt.savefig('./results/cls_DSPP_boundaries.png',bbox_inches='tight')
