@@ -1,4 +1,4 @@
-"Deep Q-Exponential Process Model"
+"Deep Sigma Point Process Model"
 
 import os
 import math
@@ -15,12 +15,10 @@ import gpytorch
 from gpytorch.means import ConstantMean, LinearMean
 from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel
 from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution, LMCVariationalStrategy
-from gpytorch.distributions import MultivariateQExponential
-from gpytorch.models.deep_qeps import DeepQEPLayer, DeepQEP
-from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
-from gpytorch.likelihoods import MultitaskQExponentialLikelihood
-
-POWER = 1.0
+from gpytorch.distributions import MultivariateNormal
+from gpytorch.models.deep_gps.dspp import DSPPLayer, DSPP
+from gpytorch.mlls import DeepPredictiveLogLikelihood
+from gpytorch.likelihoods import MultitaskGaussianLikelihood
 
 # Setting manual seed for reproducibility
 torch.manual_seed(2024)
@@ -40,16 +38,14 @@ train_x = train_x.unsqueeze(-1)
 
 
 # Here's a simple standard layer
-class DQEPHiddenLayer(DeepQEPLayer):
-    def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant'):
-        self.power = torch.tensor(POWER)
+class DSPPHiddenLayer(DSPPLayer):
+    def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant', Q=8):
         inducing_points = torch.randn(output_dims, num_inducing, input_dims)
         batch_shape = torch.Size([output_dims])
 
         variational_distribution = CholeskyVariationalDistribution(
             num_inducing_points=num_inducing,
-            batch_shape=batch_shape,
-            power=self.power
+            batch_shape=batch_shape
         )
         variational_strategy = VariationalStrategy(
             self,
@@ -58,7 +54,7 @@ class DQEPHiddenLayer(DeepQEPLayer):
             learn_inducing_locations=True
         )
 
-        super().__init__(variational_strategy, input_dims, output_dims)
+        super().__init__(variational_strategy, input_dims, output_dims, Q)
         self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         # self.covar_module = ScaleKernel(
         #     RBFKernel(
@@ -68,8 +64,8 @@ class DQEPHiddenLayer(DeepQEPLayer):
         #     )
         # )
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-            batch_shape=batch_shape, ard_num_dims=None,
+            MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
+            batch_shape=batch_shape, ard_num_dims=None, 
             lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
                 math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
             )
@@ -78,33 +74,34 @@ class DQEPHiddenLayer(DeepQEPLayer):
     def forward(self, x):
         mean_x = self.mean_module(x)
         covar_x = self.covar_module(x)
-        return MultivariateQExponential(mean_x, covar_x, power=self.power)
+        return MultivariateNormal(mean_x, covar_x)
 
 # define the main model
 num_tasks = train_y.size(-1)
-num_hidden_dqep_dims = 3
+num_hidden_dspp_dims = 3
+num_quadrature_sites = 8
 
 
-class MultitaskDeepQEP(DeepQEP):
+class MultitaskDSPP(DSPP):
     def __init__(self, train_x_shape):
-        hidden_layer = DQEPHiddenLayer(
+        hidden_layer = DSPPHiddenLayer(
             input_dims=train_x_shape[-1],
-            output_dims=num_hidden_dqep_dims,
+            output_dims=num_hidden_dspp_dims,
             mean_type='linear'
         )
-        last_layer = DQEPHiddenLayer(
+        last_layer = DSPPHiddenLayer(
             input_dims=hidden_layer.output_dims,
             output_dims=num_tasks,
             mean_type='constant'
         )
 
-        super().__init__()
+        super().__init__(num_quadrature_sites)
 
         self.hidden_layer = hidden_layer
         self.last_layer = last_layer
 
         # We're going to use a ultitask likelihood instead of the standard GaussianLikelihood
-        self.likelihood = MultitaskQExponentialLikelihood(num_tasks=num_tasks, power=torch.tensor(POWER))
+        self.likelihood = MultitaskGaussianLikelihood(num_tasks=num_tasks)
 
     def forward(self, inputs):
         hidden_rep1 = self.hidden_layer(inputs)
@@ -124,13 +121,13 @@ class MultitaskDeepQEP(DeepQEP):
         return preds.mean.mean(0), preds.variance.mean(0)
 
 
-model = MultitaskDeepQEP(train_x.shape)
+model = MultitaskDSPP(train_x.shape)
 
 
 # training
 model.train()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
-mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
+mll = DeepPredictiveLogLikelihood(model.likelihood, model, num_data=train_y.size(0))
 
 loss_list = []
 num_epochs = 1000
@@ -180,4 +177,4 @@ fig.tight_layout()
 
 # plt.show()
 os.makedirs('./results', exist_ok=True)
-plt.savefig('./results/ts_DeepQEP.png',bbox_inches='tight')
+plt.savefig('./results/ts_DSPP.png',bbox_inches='tight')

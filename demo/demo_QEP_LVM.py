@@ -24,7 +24,7 @@ from gpytorch.variational import CholeskyVariationalDistribution
 from gpytorch.kernels import ScaleKernel, RBFKernel
 from gpytorch.distributions import MultivariateQExponential
 
-POWER = 1.0
+POWER = 1.25
 
 # Setting manual seed for reproducibility
 torch.manual_seed(73)

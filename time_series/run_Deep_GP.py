@@ -39,7 +39,7 @@ train_x = train_x.unsqueeze(-1)
 
 # Here's a simple standard layer
 class DGPHiddenLayer(DeepGPLayer):
-    def __init__(self, input_dims, output_dims, num_inducing=128, linear_mean=True):
+    def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant'):
         inducing_points = torch.randn(output_dims, num_inducing, input_dims)
         batch_shape = torch.Size([output_dims])
 
@@ -55,7 +55,7 @@ class DGPHiddenLayer(DeepGPLayer):
         )
 
         super().__init__(variational_strategy, input_dims, output_dims)
-        self.mean_module = ConstantMean() if linear_mean else LinearMean(input_dims)
+        self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         # self.covar_module = ScaleKernel(
         #     RBFKernel(
         #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
@@ -86,12 +86,12 @@ class MultitaskDeepGP(DeepGP):
         hidden_layer = DGPHiddenLayer(
             input_dims=train_x_shape[-1],
             output_dims=num_hidden_dgp_dims,
-            linear_mean=True
+            mean_type='linear'
         )
         last_layer = DGPHiddenLayer(
             input_dims=hidden_layer.output_dims,
             output_dims=num_tasks,
-            linear_mean=False
+            mean_type='constant'
         )
 
         super().__init__()
@@ -175,4 +175,5 @@ for task, ax in enumerate(axs):
 fig.tight_layout()
 
 # plt.show()
+os.makedirs('./results', exist_ok=True)
 plt.savefig('./results/ts_DeepGP.png',bbox_inches='tight')

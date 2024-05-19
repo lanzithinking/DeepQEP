@@ -84,7 +84,7 @@ feature_extractor = LargeFeatureExtractor()
 
 # define the GP layer
 class GaussianProcessLayer(ApproximateGP):
-    def __init__(self, input_dims, output_dims, grid_bounds=(-10., 10.), grid_size=128, linear_mean=True):
+    def __init__(self, input_dims, output_dims, grid_bounds=(-10., 10.), grid_size=128, mean_type='constant'):
         batch_shape = torch.Size([output_dims])
         variational_distribution = CholeskyVariationalDistribution(
             num_inducing_points=grid_size, batch_shape=batch_shape
@@ -101,7 +101,7 @@ class GaussianProcessLayer(ApproximateGP):
         )
         super().__init__(variational_strategy)
 
-        self.mean_module = ConstantMean() if linear_mean else LinearMean(input_dims)
+        self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         self.covar_module = ScaleKernel(
             MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
             batch_shape=batch_shape, ard_num_dims=None,
