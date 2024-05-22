@@ -1,7 +1,6 @@
 "Deep Kernel Learning Q-Exponential Process Model"
 
 import os, argparse
-from scipy.io import loadmat
 import math
 import numpy as np
 import timeit
@@ -17,7 +16,7 @@ sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.means import ConstantMean, LinearMean
 from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel
-from gpytorch.variational import CholeskyVariationalDistribution, IndependentMultitaskVariationalStrategy, GridInterpolationVariationalStrategy
+from gpytorch.variational import CholeskyVariationalDistribution, UncorrelatedMultitaskVariationalStrategy, GridInterpolationVariationalStrategy
 from gpytorch.distributions import MultivariateQExponential
 from gpytorch.models import ApproximateQEP
 from gpytorch.mlls import VariationalELBO
@@ -95,8 +94,8 @@ def main(seed=2024):
     
             # Our base variational strategy is a GridInterpolationVariationalStrategy,
             # which places variational inducing points on a Grid
-            # We wrap it with a IndependentMultitaskVariationalStrategy so that our output is a vector-valued QEP
-            variational_strategy = IndependentMultitaskVariationalStrategy(
+            # We wrap it with a UncorrelatedMultitaskVariationalStrategy so that our output is a vector-valued QEP
+            variational_strategy = UncorrelatedMultitaskVariationalStrategy(
                 GridInterpolationVariationalStrategy(
                     self, grid_size=grid_size, grid_bounds=[grid_bounds],
                     variational_distribution=variational_distribution,

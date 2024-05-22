@@ -155,7 +155,7 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
         with torch.no_grad():
             shape = self._extended_shape(sample_shape)
             base_samples = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
-            if self.power!=2: base_samples = torch.nn.functional.normalize(base_samples, dim=-1)*Chi2(shape[-1]).sample(shape[:-1]+torch.Size([1]))**(1./self.power)
+            if self.power!=2: base_samples = torch.nn.functional.normalize(base_samples, dim=-1)*Chi2(shape[-1]).sample(shape[:-1]+torch.Size([1])).to(self.loc.device)**(1./self.power)
             if rescale: base_samples /= torch.exp((2./self.power*math.log(2) - math.log(shape[-1]) + torch.lgamma(shape[-1]/2.+2./self.power) - math.lgamma(shape[-1]/2.))/2.)
         return base_samples
 
@@ -253,6 +253,7 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
             base_samples = self.get_base_samples(torch.Size([num_samples]))
             if len(self.event_shape)==2: base_samples = base_samples.transpose(-1,-2)
             base_samples = base_samples.permute(*range(1,covar_base.dim()),0)
+            if covar_root.shape < covar_base.shape: base_samples = base_samples[...,:covar_root.size(-1),:]
             
             # Get samples
             res = covar_root.matmul(base_samples).permute(-1, *range(covar_base.dim() - 1)).contiguous()

@@ -1,7 +1,6 @@
 "Deep Kernel Learning Gaussian Process Model"
 
 import os, argparse
-from scipy.io import loadmat
 import math
 import numpy as np
 import timeit

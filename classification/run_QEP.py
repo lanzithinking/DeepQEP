@@ -101,10 +101,11 @@ for i in range(training_iter):
     loss = -mll(output, likelihood.transformed_targets).sum()
     loss.backward()
     if i % 5 == 0:
-        print('Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f' % (
+        print('Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
             i + 1, training_iter, loss.item(),
             model.covar_module.base_kernel.lengthscale.mean().item(),
-            model.likelihood.second_noise_covar.noise.mean().item()
+            model.likelihood.second_noise_covar.noise.mean().item(),
+            output.mean.argmax(0).eq(train_y).mean(dtype=float).item()
         ))
     optimizer.step()
 
@@ -117,31 +118,34 @@ with gpytorch.settings.fast_pred_var(), torch.no_grad():
 
     pred_means = test_dist.loc
 
-# plots
-os.makedirs('./results', exist_ok=True)
+acc = pred_means.argmax(0).eq(test_y).mean(dtype=float).item()
+print('Test set: Accuracy: {}%'.format(100. * acc))
 
-# logits
-fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
-sub_figs = [None]*len(axes.flat)
-for i,ax in enumerate(axes.flat):
-    plt.axes(ax)
-    sub_figs[i]=plt.contourf(
-        test_x_mat.numpy(), test_y_mat.numpy(), pred_means[i].numpy().reshape((n_test,n_test))
-    )
-    ax.set_title("Logits: Class " + str(i), fontsize = 20)
-    ax.set_aspect('auto')
-    plt.axis([-3, 3, -3, 3])
-# set color bar
-# cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
-# plt.colorbar(sub_fig, cax=cax, **kw)
-sys.path.append('../')
-from util.common_colorbar import common_colorbar
-fig=common_colorbar(fig,axes,sub_figs)
-plt.subplots_adjust(wspace=0.1, hspace=0.2)
-plt.savefig('./results/cls_QEP_logits.png',bbox_inches='tight')
-
-# boundaries
-fig = plt.figure(figsize=(5, 5))
-plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(0)[1].reshape((n_test,n_test)))
-plt.title('QEP', fontsize=20)
-plt.savefig('./results/cls_QEP_boundaries.png',bbox_inches='tight')
+# # plots
+# os.makedirs('./results', exist_ok=True)
+#
+# # logits
+# fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
+# sub_figs = [None]*len(axes.flat)
+# for i,ax in enumerate(axes.flat):
+#     plt.axes(ax)
+#     sub_figs[i]=plt.contourf(
+#         test_x_mat.numpy(), test_y_mat.numpy(), pred_means[i].numpy().reshape((n_test,n_test))
+#     )
+#     ax.set_title("Logits: Class " + str(i), fontsize = 20)
+#     ax.set_aspect('auto')
+#     plt.axis([-3, 3, -3, 3])
+# # set color bar
+# # cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
+# # plt.colorbar(sub_fig, cax=cax, **kw)
+# sys.path.append('../')
+# from util.common_colorbar import common_colorbar
+# fig=common_colorbar(fig,axes,sub_figs)
+# plt.subplots_adjust(wspace=0.1, hspace=0.2)
+# plt.savefig('./results/cls_QEP_logits.png',bbox_inches='tight')
+#
+# # boundaries
+# fig = plt.figure(figsize=(5, 5))
+# plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(0)[1].reshape((n_test,n_test)))
+# plt.title('QEP', fontsize=20)
+# plt.savefig('./results/cls_QEP_boundaries.png',bbox_inches='tight')

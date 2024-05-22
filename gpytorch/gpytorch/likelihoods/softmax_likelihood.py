@@ -7,14 +7,14 @@ import torch
 from torch import Tensor
 from torch.distributions import Categorical, Distribution
 
-from ..distributions import base_distributions, MultitaskMultivariateNormal
+from ..distributions import base_distributions, MultitaskMultivariateNormal, MultitaskMultivariateQExponential
 from ..priors import Prior
 from .likelihood import Likelihood
 
 
 class SoftmaxLikelihood(Likelihood):
     r"""
-    Implements the Softmax (multiclass) likelihood used for GP classification.
+    Implements the Softmax (multiclass) likelihood used for GP (QEP) classification.
 
     .. math::
         p(\mathbf y \mid \mathbf f) = \text{Softmax} \left( \mathbf W \mathbf f \right)
@@ -61,7 +61,7 @@ class SoftmaxLikelihood(Likelihood):
         # Catch legacy mode
         if num_data == self.num_features:
             warnings.warn(
-                "The input to SoftmaxLikelihood should be a MultitaskMultivariateNormal (num_data x num_tasks). "
+                "The input to SoftmaxLikelihood should be a MultitaskMultivariateNormal or MultitaskMultivariateQExponential (num_data x num_tasks). "
                 "Batch MultivariateNormal inputs (num_tasks x num_data) will be deprectated.",
                 DeprecationWarning,
             )
@@ -78,12 +78,20 @@ class SoftmaxLikelihood(Likelihood):
         res = base_distributions.Categorical(logits=mixed_fs)
         return res
 
-    def __call__(self, input: Union[Tensor, MultitaskMultivariateNormal], *args: Any, **kwargs: Any) -> Distribution:
-        if isinstance(input, Distribution) and not isinstance(input, MultitaskMultivariateNormal):
-            warnings.warn(
-                "The input to SoftmaxLikelihood should be a MultitaskMultivariateNormal (num_data x num_tasks). "
-                "Batch MultivariateNormal inputs (num_tasks x num_data) will be deprectated.",
-                DeprecationWarning,
-            )
-            input = MultitaskMultivariateNormal.from_batch_mvn(input)
+    def __call__(self, input: Union[Tensor, MultitaskMultivariateNormal, MultitaskMultivariateQExponential], *args: Any, **kwargs: Any) -> Distribution:
+        if isinstance(input, Distribution):
+            if not isinstance(input, MultitaskMultivariateNormal) and not hasattr(input, 'power'):
+                warnings.warn(
+                    "The input to SoftmaxLikelihood should be a MultitaskMultivariateNormal (num_data x num_tasks). "
+                    "Batch MultivariateNormal inputs (num_tasks x num_data) will be deprectated.",
+                    DeprecationWarning,
+                )
+                input = MultitaskMultivariateNormal.from_batch_mvn(input)
+            elif not isinstance(input, MultitaskMultivariateQExponential) and hasattr(input, 'power'):
+                warnings.warn(
+                    "The input to SoftmaxLikelihood should be a MultitaskMultivariateQExponential (num_data x num_tasks). "
+                    "Batch MultivariateQExponential inputs (num_tasks x num_data) will be deprectated.",
+                    DeprecationWarning,
+                )
+                input = MultitaskMultivariateQExponential.from_batch_qep(input)
         return super().__call__(input, *args, **kwargs)

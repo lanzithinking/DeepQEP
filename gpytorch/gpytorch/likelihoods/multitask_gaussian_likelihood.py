@@ -12,6 +12,7 @@ from linear_operator.operators import (
     LinearOperator,
     RootLinearOperator,
     BlockDiagLinearOperator,
+    ZeroLinearOperator
 )
 from torch import Tensor
 from torch.distributions import Normal

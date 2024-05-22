@@ -72,7 +72,7 @@ class QExponential(ExponentialFamily, Distribution):
     def sample(self, sample_shape=torch.Size(), rescale=False):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            eps = Chi2(1).sample(shape)**(1./self.power) * _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device).sign()
+            eps = Chi2(1).sample(shape).to(self.loc.device)**(1./self.power) * _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device).sign()
             if rescale: eps /= torch.exp((2./self.power*math.log(2) + torch.lgamma(0.5+2./self.power) - math.log(math.pi)/2.)/2.)
             return self.loc.expand(shape) + eps * self.scale.expand(shape) 
 
