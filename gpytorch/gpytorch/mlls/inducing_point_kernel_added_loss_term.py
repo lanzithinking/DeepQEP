@@ -61,7 +61,7 @@ class InducingPointKernelAddedLossTerm(AddedLossTerm):
             r = (diag / noise_diag).sum(dim=[-1, -2])
         else:
             r = (diag / noise_diag).sum(dim=-1)
-        res = -0.5 * r**(self.likelihood.power if hasattr(self.likelihood,'power') else 1)
+        res = -0.5 * r**(self.likelihood.power/2. if hasattr(self.likelihood,'power') else 1)
         if 'QExponential' in self.likelihood.__class__.__name__.split('Likelihood')[0]:
             if self.likelihood.power!=2: res += -0.5 * noise_diag.log().sum() + torch.tensor(noise_diag.shape[-2:]).prod()/2. * (self.likelihood.power/2.-1) * r.log()
         return res

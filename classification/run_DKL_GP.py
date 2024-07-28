@@ -7,7 +7,6 @@ from matplotlib import pyplot as plt
 
 import torch
 import tqdm
-from torch.nn import Linear
 
 # gpytorch imports
 import sys
@@ -67,19 +66,24 @@ test_y = test_labels.view(-1)
 # define the NN feature extractor
 data_dim = train_x.size(-1)
 num_features = 3
+hidden_features = [1000, 500, 100, 50]
 
-class LargeFeatureExtractor(torch.nn.Sequential):
-    def __init__(self):
-        super(LargeFeatureExtractor, self).__init__()
-        self.add_module('linear1', torch.nn.Linear(data_dim, 1000))
-        self.add_module('relu1', torch.nn.ReLU())
-        self.add_module('linear2', torch.nn.Linear(1000, 500))
-        self.add_module('relu2', torch.nn.ReLU())
-        self.add_module('linear3', torch.nn.Linear(500, 50))
-        self.add_module('relu3', torch.nn.ReLU())
-        self.add_module('linear4', torch.nn.Linear(50, num_features))
+class FeatureExtractor(torch.nn.Sequential):
+    def __init__(self, in_features, out_features, hidden_features=2):
+        super(FeatureExtractor, self).__init__()
+        if isinstance(hidden_features, int):
+            layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
+        elif isinstance(hidden_features, list):
+            layer_config = [in_features]+hidden_features+[out_features]
+        layers = []
+        for i in range(len(layer_config)-1):
+            layers.append(torch.nn.Linear(layer_config[i],layer_config[i+1]))
+            if i < len(layer_config)-2:
+                layers.append(torch.nn.ReLU())
+        self.num_layers = len(layers)
+        self.layers = torch.nn.Sequential(*layers)
 
-feature_extractor = LargeFeatureExtractor()
+feature_extractor = FeatureExtractor(in_features=data_dim, out_features=num_features, hidden_features=hidden_features)
 
 
 # define the GP layer
@@ -103,7 +107,7 @@ class GaussianProcessLayer(ApproximateGP):
 
         self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
+            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
             batch_shape=batch_shape, ard_num_dims=None,
             lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
                 math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
@@ -174,7 +178,7 @@ for i in range(training_iter):
     loss = -mll(output, model.likelihood.transformed_targets.T).sum()
     loss.backward()
     if i % 5 == 0:
-        print('Iter %d/%d - Loss: %.3f  hiddenlayer lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
+        print('Iter %d/%d - Loss: %.3f  last(GP) layer lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
             i + 1, training_iter, loss.item(),
             model.gp_layer.covar_module.base_kernel.lengthscale.mean().item(),
             model.likelihood.second_noise_covar.noise.mean().item(),
@@ -194,32 +198,32 @@ with gpytorch.settings.fast_pred_var(), torch.no_grad():
 acc = pred_means.argmax(-1).eq(test_y).mean(dtype=float).item()
 print('Test set: Accuracy: {}%'.format(100. * acc))
 
-# # plots
-# os.makedirs('./results', exist_ok=True)
-#
-# # logits
-# fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
-# sub_figs = [None]*len(axes.flat)
-# for i,ax in enumerate(axes.flat):
-#     plt.axes(ax)
-#     sub_figs[i]=plt.contourf(
-#         test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
-#     )
-#     ax.set_title("Logits: Class " + str(i), fontsize = 20)
-#     ax.set_aspect('auto')
-#     plt.axis([-3, 3, -3, 3])
-# # set color bar
-# # cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
-# # plt.colorbar(sub_fig, cax=cax, **kw)
-# sys.path.append('../')
-# from util.common_colorbar import common_colorbar
-# fig=common_colorbar(fig,axes,sub_figs)
-# plt.subplots_adjust(wspace=0.1, hspace=0.2)
-# plt.savefig('./results/cls_DKLGP_logits.png',bbox_inches='tight')
-#
-#
-# # boundaries
-# fig = plt.figure(figsize=(5, 5))
-# plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
-# plt.title('DKL GP', fontsize=20)
-# plt.savefig('./results/cls_DKLGP_boundaries.png',bbox_inches='tight')
+# plots
+os.makedirs('./results', exist_ok=True)
+
+# logits
+fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
+sub_figs = [None]*len(axes.flat)
+for i,ax in enumerate(axes.flat):
+    plt.axes(ax)
+    sub_figs[i]=plt.contourf(
+        test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
+    )
+    ax.set_title("Logits: Class " + str(i), fontsize = 20)
+    ax.set_aspect('auto')
+    plt.axis([-3, 3, -3, 3])
+# set color bar
+# cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
+# plt.colorbar(sub_fig, cax=cax, **kw)
+sys.path.append('../')
+from util.common_colorbar import common_colorbar
+fig=common_colorbar(fig,axes,sub_figs)
+plt.subplots_adjust(wspace=0.1, hspace=0.2)
+plt.savefig('./results/cls_logits_DKLGP_'+str(model.feature_extractor.num_layers)+'layers.png',bbox_inches='tight')
+
+
+# boundaries
+fig = plt.figure(figsize=(5, 5))
+plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
+plt.title('DKL GP', fontsize=20)
+plt.savefig('./results/cls_boundaries_DKLGP_'+str(model.feature_extractor.num_layers)+'layers.png',bbox_inches='tight')

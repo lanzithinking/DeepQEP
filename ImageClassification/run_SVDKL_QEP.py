@@ -40,6 +40,7 @@ def main(seed=2024):
     
     # load data
     train_loader, test_loader, feature_extractor, num_classes = dataset(args.dataset_name, seed)
+    feature_extractor.num_layers = len(list(feature_extractor.modules()))
     
     # define the QEP layer
     class QExponentialProcessLayer(ApproximateQEP):
@@ -171,15 +172,15 @@ def main(seed=2024):
         scheduler.step()
         state_dict = model.state_dict()
         likelihood_state_dict = likelihood.state_dict()
-        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dklqep'+args.dataset_name+'_checkpoint.dat'))
+        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dklqep_'+str(model.feature_extractor.num_layers)+'layers_'+args.dataset_name+'_checkpoint.dat'))
     
     # save to file
     os.makedirs('./results', exist_ok=True)
     stats = np.array([acc_list[-1], std_list[-1], nll_list[-1], times.sum()])
     stats = np.array(['DKLQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     header = ['Method', 'ACC', 'STD', 'NLL', 'time']
-    np.savetxt(os.path.join('./results',args.dataset_name+'_DKLQEP.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
-    np.savez_compressed(os.path.join('./results',args.dataset_name+'_DKLQEP'), loss=np.stack(loss_list), acc=np.stack(acc_list), std=np.stack(std_list), nll=np.stack(nll_list), times=times)
+    np.savetxt(os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.feature_extractor.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
+    np.savez_compressed(os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.feature_extractor.num_layers)+'layers'), loss=np.stack(loss_list), acc=np.stack(acc_list), std=np.stack(std_list), nll=np.stack(nll_list), times=times)
     
     # plot the result
     import matplotlib.pyplot as plt
@@ -189,7 +190,7 @@ def main(seed=2024):
     axes[1].plot(acc_list)
     axes[1].set_ylabel('Accuracy')
     plt.subplots_adjust(wspace=0.2, hspace=0.2)
-    plt.savefig(os.path.join('./results',args.dataset_name+'_DKLQEP.png'), bbox_inches='tight')
+    plt.savefig(os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.feature_extractor.num_layers)+'layers.png'), bbox_inches='tight')
 
 if __name__ == '__main__':
     main()

@@ -7,7 +7,6 @@ from matplotlib import pyplot as plt
 
 import torch
 import tqdm
-from torch.nn import Linear
 
 # gpytorch imports
 import sys
@@ -21,7 +20,7 @@ from gpytorch.models.deep_qeps import DeepQEPLayer, DeepQEP, DeepLikelihood
 from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
 from gpytorch.likelihoods import MultitaskQExponentialDirichletClassificationLikelihood
 
-POWER = 1.0
+POWER = 1.25
 
 # generate data
 def gen_data(num_data, seed = 2019):
@@ -66,7 +65,7 @@ test_y = test_labels.view(-1)
 
 
 # Here's a simple standard layer
-class DQEPHiddenLayer(DeepQEPLayer):
+class DQEPLayer(DeepQEPLayer):
     def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant'):
         self.power = torch.tensor(POWER)
         inducing_points = torch.randn(output_dims, num_inducing, input_dims)
@@ -87,7 +86,7 @@ class DQEPHiddenLayer(DeepQEPLayer):
         super().__init__(variational_strategy, input_dims, output_dims)
         self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=2.5, batch_shape=batch_shape, ard_num_dims=input_dims),
+            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
             batch_shape=batch_shape, ard_num_dims=None
         )
 
@@ -97,31 +96,30 @@ class DQEPHiddenLayer(DeepQEPLayer):
         return MultivariateQExponential(mean_x, covar_x, power=self.power)
 
 # define the main model
-num_hidden_dqepdims = 2
+hidden_features = [3, 3]
 
 class DirichletDeepQEP(DeepQEP):
-    def __init__(self, train_x, train_y, likelhood, num_classes):
-        hidden_layer = DQEPHiddenLayer(
-            input_dims=train_x.shape[-1],
-            output_dims=num_hidden_dqepdims,
-            mean_type='linear'
-        )
-        last_layer = DQEPHiddenLayer(
-            input_dims=hidden_layer.output_dims,
-            output_dims=num_classes,
-            mean_type='constant'
-        )
-
+    def __init__(self, in_features, out_features, hidden_features=2, likelihood=None):
         super().__init__()
-
-        self.hidden_layer = hidden_layer
-        self.last_layer = last_layer
-        
-        self.likelihood = likelhood
+        if isinstance(hidden_features, int):
+            layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
+        elif isinstance(hidden_features, list):
+            layer_config = [in_features]+hidden_features+[out_features]
+        layers = []
+        for i in range(len(layer_config)-1):
+            layers.append(DQEPLayer(
+                input_dims=layer_config[i],
+                output_dims=layer_config[i+1],
+                mean_type='linear' if i < len(layer_config)-2 else 'constant'
+            ))
+        self.num_layers = len(layers)
+        self.layers = torch.nn.Sequential(*layers)
+        self.likelihood = likelihood
 
     def forward(self, inputs):
-        hidden_rep1 = self.hidden_layer(inputs)
-        output = self.last_layer(hidden_rep1)
+        output = self.layers[0](inputs)
+        for i in range(1,len(self.layers)):
+            output = self.layers[i](output)
         return output
     
     def predict(self, test_x):
@@ -139,7 +137,7 @@ class DirichletDeepQEP(DeepQEP):
 
 # we let the DirichletClassificationLikelihood compute the targets for us
 likelihood = MultitaskQExponentialDirichletClassificationLikelihood(train_y, learn_additional_noise=True, power=torch.tensor(POWER))
-model = DirichletDeepQEP(train_x, likelihood.transformed_targets, likelihood, num_classes=likelihood.num_classes)
+model = DirichletDeepQEP(in_features=train_x.shape[-1], out_features=likelihood.num_classes, hidden_features=hidden_features, likelihood=likelihood)
 
 
 # Find optimal model hyperparameters
@@ -163,9 +161,9 @@ for i in range(training_iter):
     loss = -mll(output, model.likelihood.transformed_targets.T).sum()
     loss.backward()
     if i % 5 == 0:
-        print('Iter %d/%d - Loss: %.3f  hiddenlayer lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
+        print('Iter %d/%d - Loss: %.3f last layer lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
             i + 1, training_iter, loss.item(),
-            model.hidden_layer.covar_module.base_kernel.lengthscale.mean().item(),
+            model.layers[-1].covar_module.base_kernel.lengthscale.mean().item(),
             model.likelihood.second_noise_covar.noise.mean().item(),
             output.mean.mean(0).argmax(-1).eq(train_y).mean(dtype=float).item()
         ))
@@ -183,31 +181,31 @@ with gpytorch.settings.fast_pred_var(), torch.no_grad():
 acc = pred_means.argmax(-1).eq(test_y).mean(dtype=float).item()
 print('Test set: Accuracy: {}%'.format(100. * acc))
 
-# # plots
-# os.makedirs('./results', exist_ok=True)
-#
-# # logits
-# fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
-# sub_figs = [None]*len(axes.flat)
-# for i,ax in enumerate(axes.flat):
-#     plt.axes(ax)
-#     sub_figs[i]=plt.contourf(
-#         test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
-#     )
-#     ax.set_title("Logits: Class " + str(i), fontsize = 20)
-#     ax.set_aspect('auto')
-#     plt.axis([-3, 3, -3, 3])
-# # set color bar
-# # cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
-# # plt.colorbar(sub_fig, cax=cax, **kw)
-# sys.path.append('../')
-# from util.common_colorbar import common_colorbar
-# fig=common_colorbar(fig,axes,sub_figs)
-# plt.subplots_adjust(wspace=0.1, hspace=0.2)
-# plt.savefig('./results/cls_DeepQEP_logits.png',bbox_inches='tight')
-#
-# # boundaries
-# fig = plt.figure(figsize=(5, 5))
-# plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
-# plt.title('Deep QEP', fontsize=20)
-# plt.savefig('./results/cls_DeepQEP_boundaries.png',bbox_inches='tight')
+# plots
+os.makedirs('./results', exist_ok=True)
+
+# logits
+fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
+sub_figs = [None]*len(axes.flat)
+for i,ax in enumerate(axes.flat):
+    plt.axes(ax)
+    sub_figs[i]=plt.contourf(
+        test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
+    )
+    ax.set_title("Logits: Class " + str(i), fontsize = 20)
+    ax.set_aspect('auto')
+    plt.axis([-3, 3, -3, 3])
+# set color bar
+# cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
+# plt.colorbar(sub_fig, cax=cax, **kw)
+sys.path.append('../')
+from util.common_colorbar import common_colorbar
+fig=common_colorbar(fig,axes,sub_figs)
+plt.subplots_adjust(wspace=0.1, hspace=0.2)
+plt.savefig('./results/cls_logits_DeepQEP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')
+
+# boundaries
+fig = plt.figure(figsize=(5, 5))
+plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
+plt.title('Deep QEP', fontsize=20)
+plt.savefig('./results/cls_boundaries_DeepQEP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')

@@ -42,7 +42,7 @@ def main(seed=2024):
     input_dim = np.prod(list(train_loader.dataset.data.shape[1:]))
     
     # Here's a simple standard layer
-    class DQEPHiddenLayer(DeepQEPLayer):
+    class DQEPLayer(DeepQEPLayer):
         def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant'):
             self.power = POWER
             inducing_points = torch.randn(output_dims, num_inducing, input_dims, device=device)
@@ -76,34 +76,34 @@ def main(seed=2024):
             return MultivariateQExponential(mean_x, covar_x, power=self.power)
     
     # define the main model
-    num_hidden_dqepdims = 20
+    hidden_features = [20]
     
     class clsDeepQEP(DeepQEP):
-        def __init__(self, input_dim, num_classes):
-            hidden_layer = DQEPHiddenLayer(
-                input_dims=input_dim,
-                output_dims=num_hidden_dqepdims,
-                mean_type='linear'
-            )
-            last_layer = DQEPHiddenLayer(
-                input_dims=hidden_layer.output_dims,
-                output_dims=num_classes,
-                mean_type='constant'
-            )
-    
+        def __init__(self, in_features, out_features, hidden_features=2):
             super().__init__()
-    
-            self.hidden_layer = hidden_layer
-            self.last_layer = last_layer
+            if isinstance(hidden_features, int):
+                layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
+            elif isinstance(hidden_features, list):
+                layer_config = [in_features]+hidden_features+[out_features]
+            layers = []
+            for i in range(len(layer_config)-1):
+                layers.append(DQEPLayer(
+                    input_dims=layer_config[i],
+                    output_dims=layer_config[i+1],
+                    mean_type='linear' if i < len(layer_config)-2 else 'constant'
+                ))
+            self.num_layers = len(layers)
+            self.layers = torch.nn.Sequential(*layers)
     
         def forward(self, inputs):
-            hidden_rep1 = self.hidden_layer(inputs)
-            output = self.last_layer(hidden_rep1)
+            output = self.layers[0](inputs)
+            for i in range(1,len(self.layers)):
+                output = self.layers[i](output)
             return output
     
     # define likelihood and model
-    model = clsDeepQEP(input_dim=input_dim, num_classes=num_classes)
-    likelihood = SoftmaxLikelihood(num_features=model.last_layer.output_dims, num_classes=num_classes)
+    model = clsDeepQEP(in_features=input_dim, out_features=num_classes, hidden_features=hidden_features)
+    likelihood = SoftmaxLikelihood(num_features=model.layers[-1].output_dims, num_classes=num_classes)
     # set device
     model = model.to(device)
     likelihood = likelihood.to(device)
@@ -140,9 +140,9 @@ def main(seed=2024):
     #         loss_i += loss.item()
     #     scheduler.step()
     #     if i % 5 == 0:
-    #         print('Iter %d/%d - Loss: %.3f  hiddenlayer lengthscale: %.3f  accuracy: %.4f' % (
+    #         print('Iter %d/%d - Loss: %.3f last layer lengthscale: %.3f  accuracy: %.4f' % (
     #             i + 1, num_epochs, loss.item(),
-    #             model.hidden_layer.covar_module.base_kernel.lengthscale.mean().item(),
+    #             model.layers[-1].covar_module.base_kernel.lengthscale.mean().item(),
     #             output.mean.mean(0).argmax(-1).eq(y_batch.argmax(-1)).mean(dtype=float).item()
     #         ))
     #     loss_i /= len(minibatch_iter)
@@ -193,7 +193,7 @@ def main(seed=2024):
     # stats = np.array([ACC, STD, NLL, time_])
     # stats = np.array(['DeepQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     # header = ['Method', 'ACC', 'STD', 'NLL', 'time']
-    # np.savetxt(os.path.join('./results/mnist_DQEP.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
+    # np.savetxt(os.path.join('./results/mnist_DQEP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
 
 
     # define training and testing procedures
@@ -255,15 +255,15 @@ def main(seed=2024):
         scheduler.step()
         state_dict = model.state_dict()
         likelihood_state_dict = likelihood.state_dict()
-        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dqep_'+args.dataset_name+'_checkpoint.dat'))
+        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dqep_'+str(model.num_layers)+'layers_'+args.dataset_name+'_checkpoint.dat'))
     
     # save to file
     os.makedirs('./results', exist_ok=True)
     stats = np.array([acc_list[-1], std_list[-1], nll_list[-1], times.sum()])
     stats = np.array(['DQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     header = ['Method', 'ACC', 'STD', 'NLL', 'time']
-    np.savetxt(os.path.join('./results',args.dataset_name+'_DQEP.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
-    np.savez_compressed(os.path.join('./results',args.dataset_name+'_DQEP'), loss=np.stack(loss_list), acc=np.stack(acc_list), std=np.stack(std_list), nll=np.stack(nll_list), times=times)
+    np.savetxt(os.path.join('./results',args.dataset_name+'_DQEP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
+    np.savez_compressed(os.path.join('./results',args.dataset_name+'_DQEP_'+str(model.num_layers)+'layers'), loss=np.stack(loss_list), acc=np.stack(acc_list), std=np.stack(std_list), nll=np.stack(nll_list), times=times)
     
     # plot the result
     import matplotlib.pyplot as plt
@@ -273,7 +273,7 @@ def main(seed=2024):
     axes[1].plot(acc_list)
     axes[1].set_ylabel('Accuracy')
     plt.subplots_adjust(wspace=0.2, hspace=0.2)
-    plt.savefig(os.path.join('./results',args.dataset_name+'_DQEP.png'), bbox_inches='tight')
+    plt.savefig(os.path.join('./results',args.dataset_name+'_DQEP_'+str(model.num_layers)+'layers.png'), bbox_inches='tight')
     
 if __name__ == '__main__':
     main()

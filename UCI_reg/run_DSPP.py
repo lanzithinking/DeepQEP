@@ -7,7 +7,6 @@ import timeit
 
 import torch
 import tqdm
-from torch.nn import Linear
 from torch.utils.data import TensorDataset, DataLoader
 
 # gpytorch imports
@@ -61,7 +60,7 @@ def main(seed=2024):
     
     
     # Here's a simple standard layer
-    class DSPPHiddenLayer(DSPPLayer):
+    class DSPP_Layer(DSPPLayer):
         def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant', Q=8):
             inducing_points = torch.randn(output_dims, num_inducing, input_dims)
             batch_shape = torch.Size([output_dims])
@@ -101,34 +100,33 @@ def main(seed=2024):
     
     # define the main model
     num_tasks = train_y.size(-1)
-    num_hidden_dspp_dims = 3
+    hidden_features = [3]
     num_quadrature_sites = 8
     
     
     class MultitaskDSPP(DSPP):
-        def __init__(self, train_x_shape):
-            hidden_layer = DSPPHiddenLayer(
-                input_dims=train_x_shape[-1],
-                output_dims=num_hidden_dspp_dims,
-                mean_type='linear'
-            )
-            last_layer = DSPPHiddenLayer(
-                input_dims=hidden_layer.output_dims,
-                output_dims=num_tasks,
-                mean_type='constant'
-            )
-    
+        def __init__(self, in_features, out_features, hidden_features=2):
             super().__init__(num_quadrature_sites)
-    
-            self.hidden_layer = hidden_layer
-            self.last_layer = last_layer
-    
-            # We're going to use a ultitask likelihood instead of the standard GaussianLikelihood
-            self.likelihood = MultitaskGaussianLikelihood(num_tasks=num_tasks)
+            if isinstance(hidden_features, int):
+                layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
+            elif isinstance(hidden_features, list):
+                layer_config = [in_features]+hidden_features+[out_features]
+            layers = []
+            for i in range(len(layer_config)-1):
+                layers.append(DSPP_Layer(
+                    input_dims=layer_config[i],
+                    output_dims=layer_config[i+1],
+                    mean_type='linear' if i < len(layer_config)-2 else 'constant'
+                ))
+            self.num_layers = len(layers)
+            self.layers = torch.nn.Sequential(*layers)
+            # We're going to use a multitask likelihood instead of the standard GaussianLikelihood
+            self.likelihood = MultitaskGaussianLikelihood(num_tasks=out_features)
     
         def forward(self, inputs):
-            hidden_rep1 = self.hidden_layer(inputs)
-            output = self.last_layer(hidden_rep1)
+            output = self.layers[0](inputs)
+            for i in range(1,len(self.layers)):
+                output = self.layers[i](output)
             return output
     
         def predict(self, test_x):
@@ -144,7 +142,7 @@ def main(seed=2024):
             return preds.mean.mean(0), preds.variance.mean(0)
     
     
-    model = MultitaskDSPP(train_x.shape)
+    model = MultitaskDSPP(in_features=train_x.shape[-1], out_features=num_tasks, hidden_features=hidden_features)
     # set device
     model = model.to(device)
     
@@ -217,7 +215,7 @@ def main(seed=2024):
     stats = np.array([MAE, RMSE, STD, NLL, time_])
     stats = np.array(['DSPP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     header = ['Method', 'MAE', 'RMSE', 'STD', 'NLL', 'time']
-    np.savetxt('./results/elevators_DSPP.txt',stats,fmt="%s",delimiter=',',header=','.join(header))
+    np.savetxt(os.path.join('./results',args.dataset_name+'_DSPP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
 
 if __name__ == '__main__':
     main()

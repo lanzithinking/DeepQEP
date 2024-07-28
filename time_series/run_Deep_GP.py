@@ -6,7 +6,6 @@ from matplotlib import pyplot as plt
 
 import torch
 import tqdm
-from torch.nn import Linear
 
 # gpytorch imports
 import sys
@@ -38,7 +37,7 @@ train_x = train_x.unsqueeze(-1)
 
 
 # Here's a simple standard layer
-class DGPHiddenLayer(DeepGPLayer):
+class DGPLayer(DeepGPLayer):
     def __init__(self, input_dims, output_dims, num_inducing=128, mean_type='constant'):
         inducing_points = torch.randn(output_dims, num_inducing, input_dims)
         batch_shape = torch.Size([output_dims])
@@ -78,33 +77,31 @@ class DGPHiddenLayer(DeepGPLayer):
 
 # define the main model
 num_tasks = train_y.size(-1)
-num_hidden_dgp_dims = 3
-
+hidden_features = [3, 4]
 
 class MultitaskDeepGP(DeepGP):
-    def __init__(self, train_x_shape):
-        hidden_layer = DGPHiddenLayer(
-            input_dims=train_x_shape[-1],
-            output_dims=num_hidden_dgp_dims,
-            mean_type='linear'
-        )
-        last_layer = DGPHiddenLayer(
-            input_dims=hidden_layer.output_dims,
-            output_dims=num_tasks,
-            mean_type='constant'
-        )
-
+    def __init__(self, in_features, out_features, hidden_features=2):
         super().__init__()
-
-        self.hidden_layer = hidden_layer
-        self.last_layer = last_layer
-
-        # We're going to use a ultitask likelihood instead of the standard GaussianLikelihood
-        self.likelihood = MultitaskGaussianLikelihood(num_tasks=num_tasks)
+        if isinstance(hidden_features, int):
+            layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
+        elif isinstance(hidden_features, list):
+            layer_config = [in_features]+hidden_features+[out_features]
+        layers = []
+        for i in range(len(layer_config)-1):
+            layers.append(DGPLayer(
+                input_dims=layer_config[i],
+                output_dims=layer_config[i+1],
+                mean_type='linear' if i < len(layer_config)-2 else 'constant'
+            ))
+        self.num_layers = len(layers)
+        self.layers = torch.nn.Sequential(*layers)
+        # We're going to use a multitask likelihood instead of the standard GaussianLikelihood
+        self.likelihood = MultitaskGaussianLikelihood(num_tasks=out_features)
 
     def forward(self, inputs):
-        hidden_rep1 = self.hidden_layer(inputs)
-        output = self.last_layer(hidden_rep1)
+        output = self.layers[0](inputs)
+        for i in range(1,len(self.layers)):
+            output = self.layers[i](output)
         return output
 
     def predict(self, test_x):
@@ -120,7 +117,7 @@ class MultitaskDeepGP(DeepGP):
         return preds.mean.mean(0), preds.variance.mean(0)
 
 
-model = MultitaskDeepGP(train_x.shape)
+model = MultitaskDeepGP(in_features=train_x.shape[-1], out_features=num_tasks, hidden_features=hidden_features)
 
 
 # training
@@ -176,4 +173,4 @@ fig.tight_layout()
 
 # plt.show()
 os.makedirs('./results', exist_ok=True)
-plt.savefig('./results/ts_DeepGP.png',bbox_inches='tight')
+plt.savefig('./results/ts_DeepGP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')

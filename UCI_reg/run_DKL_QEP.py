@@ -7,7 +7,6 @@ import timeit
 
 import torch
 import tqdm
-from torch.nn import Linear
 from torch.utils.data import TensorDataset, DataLoader
 
 # gpytorch imports
@@ -68,19 +67,24 @@ def main(seed=2024):
     # define the NN feature extractor
     data_dim = train_x.size(-1)
     num_features = train_y.size(-1)
+    hidden_features = [1000, 500, 50]
     
-    class LargeFeatureExtractor(torch.nn.Sequential):
-        def __init__(self):
-            super(LargeFeatureExtractor, self).__init__()
-            self.add_module('linear1', torch.nn.Linear(data_dim, 1000))
-            self.add_module('relu1', torch.nn.ReLU())
-            self.add_module('linear2', torch.nn.Linear(1000, 500))
-            self.add_module('relu2', torch.nn.ReLU())
-            self.add_module('linear3', torch.nn.Linear(500, 50))
-            self.add_module('relu3', torch.nn.ReLU())
-            self.add_module('linear4', torch.nn.Linear(50, num_features))
+    class FeatureExtractor(torch.nn.Sequential):
+        def __init__(self, in_features, out_features, hidden_features=2):
+            super(FeatureExtractor, self).__init__()
+            if isinstance(hidden_features, int):
+                layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
+            elif isinstance(hidden_features, list):
+                layer_config = [in_features]+hidden_features+[out_features]
+            layers = []
+            for i in range(len(layer_config)-1):
+                layers.append(torch.nn.Linear(layer_config[i],layer_config[i+1]))
+                if i < len(layer_config)-2:
+                    layers.append(torch.nn.ReLU())
+            self.num_layers = len(layers)
+            self.layers = torch.nn.Sequential(*layers)
     
-    feature_extractor = LargeFeatureExtractor()
+    feature_extractor = FeatureExtractor(in_features=data_dim, out_features=num_features, hidden_features=hidden_features)
     
     
     # define the QEP layer
@@ -133,10 +137,10 @@ def main(seed=2024):
             super(MultitaskDKLQEP, self).__init__()
             self.feature_extractor = feature_extractor
             self.qep_layer = QExponentialProcessLayer(input_dims=num_features, output_dims=output_dims, grid_bounds=grid_bounds)
-    
-            self.likelihood = MultitaskQExponentialLikelihood(num_tasks=num_tasks, power=POWER)
+            
             # This module will scale the NN features so that they're nice values
             self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(grid_bounds[0], grid_bounds[1])
+            self.likelihood = MultitaskQExponentialLikelihood(num_tasks=output_dims, power=POWER)
     
         def forward(self, x):
             features = self.feature_extractor(x)
@@ -154,7 +158,7 @@ def main(seed=2024):
                 # To compute the marginal predictive NLL of each data point,
                 # we will call `to_data_independent_dist`,
                 # which removes the data cross-covariance terms from the distribution.
-                preds = likelihood(model(test_x)).to_data_independent_dist()
+                preds = model.likelihood(model(test_x)).to_data_independent_dist()
     
             # return preds.mean.mean(0), preds.variance.mean(0)
             return preds.mean, preds.variance
@@ -233,7 +237,7 @@ def main(seed=2024):
     stats = np.array([MAE, RMSE, STD, NLL, time_])
     stats = np.array(['DKLQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     header = ['Method', 'MAE', 'RMSE', 'STD', 'NLL', 'time']
-    np.savetxt('./results/elevators_DKLQEP.txt',stats,fmt="%s",delimiter=',',header=','.join(header))
+    np.savetxt(os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
 
 if __name__ == '__main__':
     main()
