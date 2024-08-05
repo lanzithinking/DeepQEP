@@ -73,6 +73,7 @@ def main(seed=2024):
         return acc.item()
     
     # Train the model
+    os.makedirs('./results', exist_ok=True)
     loss_list = []
     acc_list = []
     times = np.zeros(2)
@@ -88,7 +89,6 @@ def main(seed=2024):
         torch.save({'model': state_dict}, os.path.join('./results','cnn_'+args.dataset_name+'_checkpoint.dat'))
     
     # save to file
-    os.makedirs('./results', exist_ok=True)
     stats = np.array([acc_list[-1], times.sum()])
     stats = np.array(['CNN']+[np.array2string(r, precision=4) for r in stats])[None,:]
     header = ['Method', 'ACC', 'time']

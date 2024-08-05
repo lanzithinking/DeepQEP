@@ -23,7 +23,7 @@ from gpytorch.likelihoods import MultitaskQExponentialLikelihood
 
 # prepare UCI regression datasets
 if not os.path.exists('./uci_datasets'):
-    os.system('/user/local/bin/python3 -m pip install git+https://github.com/treforevans/uci_datasets.git --target=./uci_datasets')
+    os.system('/usr/local/bin/python3 -m pip install git+https://github.com/treforevans/uci_datasets.git --target=./uci_datasets')
 sys.path.append('./uci_datasets')
 from uci_datasets import Dataset
 
@@ -235,9 +235,22 @@ def main(seed=2024):
     # save to file
     os.makedirs('./results', exist_ok=True)
     stats = np.array([MAE, RMSE, STD, NLL, time_])
-    stats = np.array(['DKLQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
-    header = ['Method', 'MAE', 'RMSE', 'STD', 'NLL', 'time']
-    np.savetxt(os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
+    stats = np.array([seed,'DKLQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
+    header = ['seed', 'Method', 'MAE', 'RMSE', 'STD', 'NLL', 'time']
+    f_name = os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.feature_extractor.num_layers)+'layers.txt')
+    with open(f_name,'ab') as f:
+        np.savetxt(f,stats,fmt="%s",delimiter=',',header=','.join(header) if seed==2024 else '')
 
 if __name__ == '__main__':
-    main()
+    # main()
+    n_seed = 10; i=0; n_success=0
+    while n_success < n_seed:
+        seed_i=2024+i*10
+        try:
+            print("Running for seed %d ...\n"% (seed_i))
+            main(seed=seed_i)
+            n_success+=1
+        except Exception as e:
+            print(e)
+            pass
+        i+=1

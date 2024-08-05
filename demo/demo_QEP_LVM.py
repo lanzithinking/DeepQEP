@@ -24,7 +24,7 @@ from gpytorch.variational import CholeskyVariationalDistribution
 from gpytorch.kernels import ScaleKernel, RBFKernel
 from gpytorch.distributions import MultivariateQExponential
 
-POWER = 1.25
+POWER = 2.5
 
 # Setting manual seed for reproducibility
 torch.manual_seed(73)
@@ -154,9 +154,10 @@ colors = ['r', 'b', 'g']
 plt.subplot(131)
 X = model.X.q_mu.detach().numpy()
 std = torch.nn.functional.softplus(model.X.q_log_sigma).detach().numpy()
-plt.title('2d latent subspace corresponding to 3 phase oilflow')
-plt.xlabel('Latent dim 1')
-plt.ylabel('Latent dim 2')
+plt.title('2d latent subspace', fontsize=18)# corresponding to 3 phase oilflow')
+plt.xlabel('Latent dim 1', fontsize=20)
+plt.ylabel('Latent dim 2', fontsize=20)
+plt.tick_params(axis='both', which='major', labelsize=10)
 
 # Select index of the smallest lengthscales by examining model.covar_module.base_kernel.lengthscales
 for i, label in enumerate(np.unique(labels)):
@@ -167,10 +168,12 @@ for i, label in enumerate(np.unique(labels)):
 
 plt.subplot(132)
 plt.bar(np.arange(latent_dim), height=inv_lengthscale.detach().numpy().flatten())
-plt.title('Inverse Lengthscale with SE-ARD kernel')
+plt.title('Inverse Lengthscale with SE-ARD kernel', fontsize=18)
+plt.tick_params(axis='both', which='major', labelsize=10)
 
 plt.subplot(133)
 plt.plot(loss_list, label='batch_size=100')
-plt.title('Neg. ELBO Loss')
+plt.title('Neg. ELBO Loss', fontsize=18)
+plt.tick_params(axis='both', which='major', labelsize=10)
 # plt.show()
-plt.savefig('./demo_QEP-LVM.png',bbox_inches='tight')
+plt.savefig('./demo_QEP-LVM_'+str(POWER)+'.png',bbox_inches='tight')

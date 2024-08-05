@@ -1,4 +1,4 @@
-"Deep Kernel Learning Gaussian Process Model"
+"Deep Kernel Learning Gaussian Process Classification Model"
 
 import os, argparse
 import math
@@ -14,22 +14,24 @@ import sys
 sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.means import ConstantMean, LinearMean
-from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.variational import CholeskyVariationalDistribution, IndependentMultitaskVariationalStrategy, GridInterpolationVariationalStrategy
 from gpytorch.distributions import MultivariateNormal
 from gpytorch.models import ApproximateGP
 from gpytorch.mlls import VariationalELBO
-from gpytorch.likelihoods import MultitaskGaussianLikelihood
+from gpytorch.likelihoods import MultitaskDirichletClassificationLikelihood
 
-# prepare UCI regression datasets
-if not os.path.exists('./uci_datasets'):
-    os.system('/usr/local/bin/python3 -m pip install git+https://github.com/treforevans/uci_datasets.git --target=./uci_datasets')
-sys.path.append('./uci_datasets')
-from uci_datasets import Dataset
+
+# prepare UCI classification datasets
+# if not os.path.exists('./uci_dataset'):
+#     os.system('/usr/local/bin/python3 -m pip install git+https://github.com/maryami66/uci_dataset.git --target=./uci_dataset')
+# sys.path.append('./uci_dataset')
+# import uci_dataset as dataset
+from uci_utils import UCI_Dataset_Loader as dataset
 
 def main(seed=2024):
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_name', nargs='?', type=str, default='elevators')
+    parser.add_argument('dataset_name', nargs='?', type=str, default='car')
     args = parser.parse_args()
     
     # Setting manual seed for reproducibility
@@ -40,20 +42,29 @@ def main(seed=2024):
     print('Using the '+device+' device...')
     
     # load data set
-    data = Dataset(args.dataset_name)
+    # data = getattr(dataset,'load_'+args.dataset_name)().dropna()
+    X, y = getattr(dataset,args.dataset_name)()
+    try:
+        X = torch.tensor(X.values).float()
+    except:
+        X = torch.Tensor(X.values.astype(float))
+    y = torch.tensor(y.values).long()
     
-    X = torch.Tensor(data.x)
-    X = X - X.min(0)[0]
-    X = 2 * (X / X.max(0)[0]) - 1
-    y = torch.Tensor(data.y)
+    # X = torch.tensor(data.loc[:,data.columns!='target'].values).float()
+    # # X = X - X.min(0)[0]
+    # # X = 2 * (X / X.max(0)[0]) - 1
+    # X = (X - X.mean(0))/X.std(0)
+    # y = torch.tensor(data.target.values).long()
     
     # split data
-    train_n = int(math.floor(0.8 * len(X)))
-    train_x = X[:train_n, :].contiguous().to(device)
-    train_y = y[:train_n, :].contiguous().to(device)
+    train_id = np.random.default_rng(2024).choice(len(X), int(np.floor(0.8 * len(X))), replace=False)
+    test_id = np.setdiff1d(np.arange(len(X)), train_id)
     
-    test_x = X[train_n:, :].contiguous().to(device)
-    test_y = y[train_n:, :].contiguous().to(device)
+    train_x = X[train_id, :].contiguous().to(device)
+    train_y = y[train_id].contiguous().to(device)
+    
+    test_x = X[test_id, :].contiguous().to(device)
+    test_y = y[test_id].contiguous().to(device)
     
     train_dataset = TensorDataset(train_x, train_y)
     train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
@@ -61,10 +72,9 @@ def main(seed=2024):
     test_dataset = TensorDataset(test_x, test_y)
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False)
     
-    
     # define the NN feature extractor
     data_dim = train_x.size(-1)
-    num_features = train_y.size(-1)
+    num_features = len(torch.unique(y))
     hidden_features = [1000, 500, 50]
     
     class FeatureExtractor(torch.nn.Sequential):
@@ -105,13 +115,6 @@ def main(seed=2024):
             super().__init__(variational_strategy)
     
             self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
-            # self.covar_module = ScaleKernel(
-            #     RBFKernel(
-            #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-            #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
-            #         ), batch_shape=batch_shape, ard_num_dims=input_dims
-            #     )
-            # )
             self.covar_module = ScaleKernel(
                 MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
                 batch_shape=batch_shape, ard_num_dims=None,
@@ -127,17 +130,16 @@ def main(seed=2024):
     
     
     # define the main model
-    num_tasks = train_y.size(-1)
     
-    class MultitaskDKLGP(gpytorch.Module):
-        def __init__(self, feature_extractor, output_dims, grid_bounds=(-10., 10.)):
-            super(MultitaskDKLGP, self).__init__()
+    class DirichletDKLGP(gpytorch.Module):
+        def __init__(self, feature_extractor, output_dims, likelihood, grid_bounds=(-10., 10.)):
+            super(DirichletDKLGP, self).__init__()
             self.feature_extractor = feature_extractor
             self.gp_layer = GaussianProcessLayer(input_dims=num_features, output_dims=output_dims, grid_bounds=grid_bounds)
-            
+            self.likelihood = likelihood
+    
             # This module will scale the NN features so that they're nice values
             self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(grid_bounds[0], grid_bounds[1])
-            self.likelihood = MultitaskGaussianLikelihood(num_tasks=output_dims)
     
         def forward(self, x):
             features = self.feature_extractor(x)
@@ -155,21 +157,44 @@ def main(seed=2024):
                 # To compute the marginal predictive NLL of each data point,
                 # we will call `to_data_independent_dist`,
                 # which removes the data cross-covariance terms from the distribution.
-                preds = model.likelihood(model(test_x)).to_data_independent_dist()
+                preds = likelihood(model(test_x)).to_data_independent_dist()
     
             # return preds.mean.mean(0), preds.variance.mean(0)
             return preds.mean, preds.variance
     
+    # we let the DirichletClassificationLikelihood compute the targets for us
+    likelihood = MultitaskDirichletClassificationLikelihood(train_y, learn_additional_noise=True)
+    likelihood.has_global_noise = True
+    def _prepare_targets(targets, alpha_epsilon= 0.01, dtype=torch.float, num_classes=None):
+            if num_classes is None:
+                num_classes = int(targets.max() + 1)
+            # set alpha = \alpha_\epsilon
+            alpha = alpha_epsilon * torch.ones(targets.shape[-1], num_classes, device=targets.device, dtype=dtype)
     
-    model = MultitaskDKLGP(feature_extractor, output_dims=num_tasks)
+            # alpha[class_labels] = 1 + \alpha_\epsilon
+            alpha[torch.arange(len(targets)), targets] = alpha[torch.arange(len(targets)), targets] + 1.0
+    
+            # sigma^2 = log(1 / alpha + 1)
+            sigma2_i = torch.log(alpha.reciprocal() + 1.0)
+    
+            # y = log(alpha) - 0.5 * sigma^2
+            transformed_targets = alpha.log() - 0.5 * sigma2_i
+    
+            return sigma2_i.transpose(-2, -1).type(dtype), transformed_targets.type(dtype), num_classes
+    likelihood._prepare_targets = _prepare_targets
+    model = DirichletDKLGP(feature_extractor, likelihood.num_classes, likelihood)
     # set device
     model = model.to(device)
     
-    # training
+    # Find optimal model hyperparameters
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    mll = VariationalELBO(model.likelihood, model.gp_layer, num_data=train_y.size(0))
+    # likelihood.train()
     
+    # Use the adam optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)  # Includes GaussianLikelihood parameters
+    
+    # "Loss" for GPs - the marginal log likelihood
+    mll = VariationalELBO(model.likelihood, model.gp_layer, num_data=train_y.size(0))
     
     loss_list = []
     num_epochs = 1000
@@ -178,16 +203,32 @@ def main(seed=2024):
     for i in epochs_iter:
         # Within each iteration, we will go over each minibatch of data
         minibatch_iter = tqdm.tqdm(train_loader, desc="Minibatch", leave=False)
+        correct_i = 0
         loss_i = 0
         for x_batch, y_batch in minibatch_iter:
+            if torch.cuda.is_available():
+                x_batch, y_batch = x_batch.cuda(), y_batch.cuda()
+            # Zero gradients from previous iteration
             optimizer.zero_grad()
+            # Output from model
             output = model(x_batch)
-            loss = -mll(output, y_batch)
-            epochs_iter.set_postfix(loss=loss.item())
+            correct_i += output.mean.argmax(-1).eq(y_batch).cpu().sum()
+            # Calc loss and backprop gradients
+            loss = -mll(output, model.likelihood._prepare_targets(y_batch, num_classes=likelihood.num_classes)[1]).sum()
             loss.backward()
+            # if i % 5 == 0:
+            #     print('Iter %d/%d - Loss: %.3f last layer lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
+            #         i + 1, num_epochs, loss.item(),
+            #         model.layers[-1].covar_module.base_kernel.lengthscale.mean().item(),
+            #         model.likelihood.second_noise_covar.noise.mean().item(),
+            #         output.mean.argmax(-1).eq(y_batch).mean(dtype=float).item()
+            #     ))
             optimizer.step()
             loss_i += loss.item()
+            minibatch_iter.set_postfix(loss=loss.item())
         loss_i /= len(minibatch_iter)
+        acc = correct_i / float(len(train_loader.dataset))
+        epochs_iter.set_postfix(acc=acc.item())
         # record the loss and the best model
         loss_list.append(loss_i)
         if i==0:
@@ -202,46 +243,50 @@ def main(seed=2024):
     
     # load the best model
     model.load_state_dict(optim_model)
-    # Make predictions
+    # prediction
     model.eval()
-    means = []
-    vars = []
-    lls = []
-    with torch.no_grad():#, gpytorch.settings.fast_pred_var():
-        for x_batch, y_batch in test_loader:
-            # mean, var = model.predict(x_batch)
-            # means = torch.cat([means, mean.cpu()])
-            # vars = torch.cat([means, var.cpu()])
-            preds = model(x_batch)
-            means.append(preds.mean.cpu())
-            vars.append(preds.variance.cpu())
-            lls.append(model.likelihood.log_marginal(y_batch, preds).cpu())
-    means = torch.cat(means, 0)
-    vars = torch.cat(vars, 0)
-    lls = torch.cat(lls, 0)
+    # likelihood.eval()
     
-    MAE = torch.mean(torch.abs(means - test_y.cpu())).item()
-    RMSE = torch.mean(torch.pow(means - test_y.cpu(), 2)).sqrt().item()
-    STD = torch.mean(vars.sqrt()).item()
+    from sklearn.metrics import roc_auc_score
+    correct = 0
+    lls = []
+    aucs = []
+    with gpytorch.settings.fast_pred_var(), torch.no_grad():
+        for x_batch, y_batch in test_loader:
+            if torch.cuda.is_available():
+                x_batch, y_batch = x_batch.cuda(), y_batch.cuda()
+            test_dist = model(x_batch)
+            pred_means = test_dist.mean#.mean(0)
+            col_max, pred = torch.max(pred_means,-1)
+            correct += pred.eq(y_batch).cpu().sum()
+            lls.append(model.likelihood.log_marginal(y_batch[:,None], test_dist).cpu())
+            y_score = torch.exp(pred_means[:,torch.unique(y_batch)] - col_max[:,None]) if model.likelihood.num_classes>2 else pred_means[torch.arange(y_batch.size(0)),pred][:,None]
+            if y_score.size(1)>1: y_score /= y_score.sum(1,keepdims=True)
+            if model.likelihood.num_classes>2:
+                aucs.append(roc_auc_score(y_batch.cpu(), y_score.cpu(), multi_class='ovo'))
+            else:
+                aucs.append(roc_auc_score(y_batch.cpu(), y_score.cpu()))
+    lls = torch.cat(lls, 0);  aucs = np.stack(aucs)
     NLL = -lls.mean().item()
-    print('Test MAE: {}'.format(MAE))
-    print('Test RMSE: {}'.format(RMSE))
-    print('Test std: {}'.format(STD))
+    ACC = correct / float(len(test_loader.dataset))
+    AUC = aucs.mean().item()
+    print('Test Accuracy: {}%'.format(100. * ACC))
+    print('Test AUC: {}'.format(AUC))
     print('Test NLL: {}'.format(NLL))
     
     # save to file
     os.makedirs('./results', exist_ok=True)
-    stats = np.array([MAE, RMSE, STD, NLL, time_])
+    stats = np.array([ACC, AUC, NLL, time_])
     stats = np.array([seed,'DKLGP']+[np.array2string(r, precision=4) for r in stats])[None,:]
-    header = ['seed', 'Method', 'MAE', 'RMSE', 'STD', 'NLL', 'time']
+    header = ['seed', 'Method', 'ACC', 'AUC', 'NLL', 'time']
     f_name = os.path.join('./results',args.dataset_name+'_DKLGP_'+str(model.feature_extractor.num_layers)+'layers.txt')
     with open(f_name,'ab') as f:
         np.savetxt(f,stats,fmt="%s",delimiter=',',header=','.join(header) if seed==2024 else '')
 
 if __name__ == '__main__':
     # main()
-    n_seed = 10; i=0; n_success=0
-    while n_success < n_seed:
+    n_seed = 10; i=0; n_success=0; n_failure=0
+    while n_success < n_seed and n_failure < 10* n_seed:
         seed_i=2024+i*10
         try:
             print("Running for seed %d ...\n"% (seed_i))
@@ -249,5 +294,6 @@ if __name__ == '__main__':
             n_success+=1
         except Exception as e:
             print(e)
+            n_failure+=1
             pass
         i+=1

@@ -72,7 +72,7 @@ def main(seed=2024):
             return MultivariateNormal(mean_x, covar_x)
     
     # define the main model
-    hidden_features = [20]
+    hidden_features = [100]
     
     class clsDeepGP(DeepGP):
         def __init__(self, in_features, out_features, hidden_features=2):
@@ -109,7 +109,8 @@ def main(seed=2024):
     # mll = DeepApproximateMLL(VariationalELBO(likelihood, model, num_data=len(train_loader.dataset)))
     
     # Use the adam optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    optimizer = torch.optim.Adam([{'params':model.parameters()},
+                                  {'params':likelihood.parameters()}], lr=0.1)
     num_epochs = 1000
     scheduler = MultiStepLR(optimizer, milestones=[0.5 * num_epochs, 0.75 * num_epochs], gamma=0.1)
     
@@ -235,6 +236,7 @@ def main(seed=2024):
         return acc.item(), torch.cat(vars, 0).sqrt().mean().item(), -torch.cat(lls, 0).mean().item()
     
     # Train the model
+    os.makedirs('./results', exist_ok=True)
     loss_list = []
     acc_list = []
     std_list = []
@@ -255,7 +257,6 @@ def main(seed=2024):
         torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dgp_'+str(model.num_layers)+'layers_'+args.dataset_name+'_checkpoint.dat'))
     
     # save to file
-    os.makedirs('./results', exist_ok=True)
     stats = np.array([acc_list[-1], std_list[-1], nll_list[-1], times.sum()])
     stats = np.array(['DGP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     header = ['Method', 'ACC', 'STD', 'NLL', 'time']

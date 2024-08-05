@@ -20,7 +20,7 @@ from gpytorch.models.deep_qeps import DeepQEPLayer, DeepQEP, DeepLikelihood
 from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
 from gpytorch.likelihoods import MultitaskQExponentialDirichletClassificationLikelihood
 
-POWER = 1.25
+POWER = 1.0
 
 # generate data
 def gen_data(num_data, seed = 2019):
@@ -87,7 +87,10 @@ class DQEPLayer(DeepQEPLayer):
         self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         self.covar_module = ScaleKernel(
             MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-            batch_shape=batch_shape, ard_num_dims=None
+            batch_shape=batch_shape, ard_num_dims=None,
+            lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+            )
         )
 
     def forward(self, x):
@@ -145,13 +148,13 @@ model.train()
 # likelihood.train()
 
 # Use the adam optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes QExponentialLikelihood parameters
+optimizer = torch.optim.Adam(model.parameters(), lr=0.03)  # Includes QExponentialLikelihood parameters
 
 # "Loss" for QEPs - the marginal log likelihood
 mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
 # mll = DeepLikelihood(VariationalELBO(model.likelihood, model, num_data=train_y.size(0)))
 
-training_iter = 500
+training_iter = 1000
 for i in range(training_iter):
     # Zero gradients from previous iteration
     optimizer.zero_grad()
@@ -181,31 +184,31 @@ with gpytorch.settings.fast_pred_var(), torch.no_grad():
 acc = pred_means.argmax(-1).eq(test_y).mean(dtype=float).item()
 print('Test set: Accuracy: {}%'.format(100. * acc))
 
-# plots
-os.makedirs('./results', exist_ok=True)
-
-# logits
-fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
-sub_figs = [None]*len(axes.flat)
-for i,ax in enumerate(axes.flat):
-    plt.axes(ax)
-    sub_figs[i]=plt.contourf(
-        test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
-    )
-    ax.set_title("Logits: Class " + str(i), fontsize = 20)
-    ax.set_aspect('auto')
-    plt.axis([-3, 3, -3, 3])
-# set color bar
-# cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
-# plt.colorbar(sub_fig, cax=cax, **kw)
-sys.path.append('../')
-from util.common_colorbar import common_colorbar
-fig=common_colorbar(fig,axes,sub_figs)
-plt.subplots_adjust(wspace=0.1, hspace=0.2)
-plt.savefig('./results/cls_logits_DeepQEP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')
-
-# boundaries
-fig = plt.figure(figsize=(5, 5))
-plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
-plt.title('Deep QEP', fontsize=20)
-plt.savefig('./results/cls_boundaries_DeepQEP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')
+# # plots
+# os.makedirs('./results', exist_ok=True)
+#
+# # logits
+# fig, axes = plt.subplots(nrows=1,ncols=3,sharex=True,sharey=True,figsize=(15,5))
+# sub_figs = [None]*len(axes.flat)
+# for i,ax in enumerate(axes.flat):
+#     plt.axes(ax)
+#     sub_figs[i]=plt.contourf(
+#         test_x_mat.numpy(), test_y_mat.numpy(), pred_means[:,i].numpy().reshape((n_test,n_test))
+#     )
+#     ax.set_title("Logits: Class " + str(i), fontsize = 20)
+#     ax.set_aspect('auto')
+#     plt.axis([-3, 3, -3, 3])
+# # set color bar
+# # cax,kw = mp.colorbar.make_axes([ax for ax in axes.flat])
+# # plt.colorbar(sub_fig, cax=cax, **kw)
+# sys.path.append('../')
+# from util.common_colorbar import common_colorbar
+# fig=common_colorbar(fig,axes,sub_figs)
+# plt.subplots_adjust(wspace=0.1, hspace=0.2)
+# plt.savefig('./results/cls_logits_DeepQEP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')
+#
+# # boundaries
+# fig = plt.figure(figsize=(5, 5))
+# plt.contourf(test_x_mat.numpy(), test_y_mat.numpy(), pred_means.max(1)[1].reshape((n_test,n_test)))
+# plt.title('Deep QEP', fontsize=20)
+# plt.savefig('./results/cls_boundaries_DeepQEP_'+str(model.num_layers)+'layers.png',bbox_inches='tight')

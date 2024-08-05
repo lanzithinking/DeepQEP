@@ -8,7 +8,6 @@ from matplotlib import pyplot as plt
 
 # gpytorch imports
 import sys
-from matplotlib.lines import fillStyles
 sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.models import ExactGP
