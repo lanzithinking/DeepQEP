@@ -1,13 +1,13 @@
 "Deep Kernel Learning Gaussian Process Classification Model"
 
 import os, argparse
-import math
+import random
 import numpy as np
 import timeit
 
 import torch
 import tqdm
-from torch.optim.lr_scheduler import MultiStepLR
+# from torch.optim.lr_scheduler import MultiStepLR
 
 # gpytorch imports
 import sys
@@ -27,17 +27,22 @@ os.makedirs('./results', exist_ok=True)
 def main(seed=2024):
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_name', nargs='?', type=str, default='mnist')
+    parser.add_argument('batch_size', nargs='?', type=int, default=256)
     args = parser.parse_args()
     
     # Setting manual seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using the '+device+' device...')
     
     # load data
-    train_loader, test_loader, feature_extractor, num_classes = dataset(args.dataset_name, seed)
+    train_loader, test_loader, feature_extractor, num_classes = dataset(args.dataset_name, seed, batch_size=args.batch_size, full_fledged=True)
     feature_extractor.num_layers = len(list(feature_extractor.modules()))
     
     # define the GP layer
@@ -57,7 +62,7 @@ def main(seed=2024):
                 GridInterpolationVariationalStrategy(
                     self, grid_size=grid_size, grid_bounds=[grid_bounds],
                     variational_distribution=variational_distribution,
-                ), num_tasks=input_dims,
+                ), num_tasks=output_dims,
             )
             super().__init__(variational_strategy)
     
@@ -66,7 +71,7 @@ def main(seed=2024):
                 MaternKernel(nu=1.5, batch_shape=self.batch_shape, ard_num_dims=input_dims),
                 batch_shape=self.batch_shape, ard_num_dims=None,
                 lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                    math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+                    np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp
                 )
             )
     
@@ -107,9 +112,9 @@ def main(seed=2024):
     
     # Use the adam optimizer
     optimizer = torch.optim.Adam([{'params':model.parameters()},
-                                  {'params':likelihood.parameters()}], lr=0.1)
+                                  {'params':likelihood.parameters()}], lr=0.001)
     num_epochs = 1000#{'mnist':100, 'cifar10':500}[args.dataset_name]
-    scheduler = MultiStepLR(optimizer, milestones=[0.5 * num_epochs, 0.75 * num_epochs], gamma=0.1)
+    # scheduler = MultiStepLR(optimizer, milestones=[0.5 * num_epochs, 0.75 * num_epochs], gamma=0.1)
     
     # define training and testing procedures
     def train(epoch):
@@ -168,7 +173,7 @@ def main(seed=2024):
             acc, std, nll = test(epoch)
             times[1] += timeit.default_timer()-beginning
             acc_list.append(acc); std_list.append(std); nll_list.append(nll)
-        scheduler.step()
+        # scheduler.step()
         state_dict = model.state_dict()
         likelihood_state_dict = likelihood.state_dict()
         torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dklgp_'+str(model.feature_extractor.num_layers)+'layers_'+args.dataset_name+'_checkpoint.dat'))

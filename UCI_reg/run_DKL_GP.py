@@ -1,7 +1,6 @@
 "Deep Kernel Learning Gaussian Process Model"
 
 import os, argparse
-import math
 import numpy as np
 import timeit
 
@@ -48,7 +47,7 @@ def main(seed=2024):
     y = torch.Tensor(data.y)
     
     # split data
-    train_n = int(math.floor(0.8 * len(X)))
+    train_n = int(np.floor(0.8 * len(X)))
     train_x = X[:train_n, :].contiguous().to(device)
     train_y = y[:train_n, :].contiguous().to(device)
     
@@ -108,16 +107,16 @@ def main(seed=2024):
             # self.covar_module = ScaleKernel(
             #     RBFKernel(
             #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-            #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+            #             np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp
             #         ), batch_shape=batch_shape, ard_num_dims=input_dims
             #     )
             # )
             self.covar_module = ScaleKernel(
-                MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-                batch_shape=batch_shape, ard_num_dims=None,
-                lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                    math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
-                )
+                MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims,
+                    # lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                    #     np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp)
+                ),
+                batch_shape=batch_shape,
             )
     
         def forward(self, x):

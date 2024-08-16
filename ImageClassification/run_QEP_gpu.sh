@@ -3,7 +3,7 @@
 #SBATCH -N 1            # number of nodes
 #SBATCH -c 1            # number of cores 
 #SBATCH --mem=64G       # amount of RAM requested in GiB (2^40)
-#SBATCH -t 0-12:00:00   # time in d-hh:mm:ss
+#SBATCH -t 0-08:00:00   # time in d-hh:mm:ss
 #SBATCH -p general      # partition 
 #SBATCH -q public       # QOS
 #SBATCH --gres=gpu:a100:1    # number of Request GPUs
@@ -36,5 +36,5 @@ elif [ $# -eq 2 ]; then
 	likelihood="$2"
 fi
 
-python -u run_Deep_QEP_${likelihood}.py ${dataset_name} #> Deep_QEP.log &
-# sbatch --job-name=DeepQEP --output=Deep_QEP.log run_DQEP_gpu.sh
+python -u run_QEP_${likelihood}.py ${dataset_name} #> QEP.log &
+# sbatch --job-name=QEP --output=QEP.log run_QEP_gpu.sh

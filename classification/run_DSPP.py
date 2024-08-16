@@ -1,7 +1,6 @@
 "Deep Sigma Point Process Classification Model"
 
 import os
-import math
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -83,11 +82,11 @@ class DSPP_Layer(DSPPLayer):
         super().__init__(variational_strategy, input_dims, output_dims, Q)
         self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-            batch_shape=batch_shape, ard_num_dims=None, 
-            lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
-            )
+            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims,
+                # lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                #     np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp)
+            ),
+            batch_shape=batch_shape,
         )
 
     def forward(self, x):

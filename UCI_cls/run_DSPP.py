@@ -1,7 +1,6 @@
 "Deep Sigma Point Process Classification Model"
 
 import os, argparse
-import math
 import numpy as np
 import timeit
 
@@ -51,9 +50,9 @@ def main(seed=2024):
     y = torch.tensor(y.values).long()
     
     # X = torch.tensor(data.loc[:,data.columns!='target'].values).float()
-    # # X = X - X.min(0)[0]
-    # # X = 2 * (X / X.max(0)[0]) - 1
-    # X = (X - X.mean(0))/X.std(0)
+    # X = X - X.min(0)[0]
+    # X = 2 * (X / (X.max(0)[0]+(X.max(0)[0]==0)*torch.ones(X.shape[1:]))) - 1
+    # X = (X - X.mean(0))/(X.std(0)+(X.std(0)==0)*torch.ones(X.shape[1:]))
     # y = torch.tensor(data.target.values).long()
     
     # split data
@@ -93,11 +92,11 @@ def main(seed=2024):
             super().__init__(variational_strategy, input_dims, output_dims, Q)
             self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
             self.covar_module = ScaleKernel(
-                MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-                batch_shape=batch_shape, ard_num_dims=None, 
-                lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                    math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
-                )
+                MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims,
+                    # lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                    #     np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp)
+                ),
+                batch_shape=batch_shape,
             )
     
         def forward(self, x):

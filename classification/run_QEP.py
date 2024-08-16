@@ -1,10 +1,10 @@
 "Q-Exponential Process Classification Model"
 
 import os
-import math
-import torch
 import numpy as np
 from matplotlib import pyplot as plt
+
+import torch
 
 # gpytorch imports
 import sys

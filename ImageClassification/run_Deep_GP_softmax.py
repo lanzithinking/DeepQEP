@@ -2,6 +2,7 @@
 
 import os, argparse
 import math
+import random
 import numpy as np
 import timeit
 
@@ -14,7 +15,7 @@ import sys
 sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.means import ConstantMean, LinearMean
-from gpytorch.kernels import MaternKernel, ScaleKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel
 from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution
 from gpytorch.distributions import MultivariateNormal
 from gpytorch.models.deep_gps import DeepGPLayer, DeepGP, DeepLikelihood
@@ -26,18 +27,24 @@ os.makedirs('./results', exist_ok=True)
 
 def main(seed=2024):
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_name', nargs='?', type=str, default='mnist')
+    parser.add_argument('dataset_name', nargs='?', type=str, default='cifar10')
+    parser.add_argument('batch_size', nargs='?', type=int, default=256)
     args = parser.parse_args()
     # Setting manual seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using the '+device+' device...')
     
     # load data
-    train_loader, test_loader, feature_extractor, num_classes = dataset(args.dataset_name, seed)
-    input_dim = np.prod(list(train_loader.dataset.data.shape[1:]))
+    train_loader, test_loader, feature_extractor, num_classes = dataset(args.dataset_name, seed, batch_size=args.batch_size)
+    # input_dim = np.prod(list(train_loader.dataset.data.shape[1:]))
+    input_dim = np.prod(next(iter(train_loader))[0].shape[1:])
     
     # Here's a simple standard layer
     class DGPLayer(DeepGPLayer):
@@ -58,12 +65,19 @@ def main(seed=2024):
     
             super().__init__(variational_strategy, input_dims, output_dims)
             self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(input_dims)}[mean_type]
+            # self.covar_module = ScaleKernel(
+            #     RBFKernel(
+            #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+            #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+            #         )
+            #     )
+            # )
             self.covar_module = ScaleKernel(
-                MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-                batch_shape=batch_shape, ard_num_dims=None,
-                lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                    math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
-                )
+                MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims,
+                    lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                        math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp)
+                ),
+                batch_shape=batch_shape,
             )
     
         def forward(self, x):
@@ -72,7 +86,7 @@ def main(seed=2024):
             return MultivariateNormal(mean_x, covar_x)
     
     # define the main model
-    hidden_features = [100]
+    hidden_features = [5]
     
     class clsDeepGP(DeepGP):
         def __init__(self, in_features, out_features, hidden_features=2):
@@ -102,15 +116,25 @@ def main(seed=2024):
     likelihood = SoftmaxLikelihood(num_features=model.layers[-1].output_dims, num_classes=num_classes)
     # set device
     model = model.to(device)
+    # for p in model.parameters():
+    #     p.data.uniform_(0,1./np.sqrt(input_dim/10))
     likelihood = likelihood.to(device)
+    # for p in likelihood.parameters():
+    #     p.data.uniform_(0,1./np.sqrt(input_dim/10))
     
     # "Loss" for GPs - the marginal log likelihood
-    mll = VariationalELBO(likelihood, model, num_data=len(train_loader.dataset))
-    # mll = DeepApproximateMLL(VariationalELBO(likelihood, model, num_data=len(train_loader.dataset)))
+    # mll = VariationalELBO(likelihood, model, num_data=len(train_loader.dataset))
+    mll = DeepApproximateMLL(VariationalELBO(likelihood, model, num_data=len(train_loader.dataset)))
     
     # Use the adam optimizer
     optimizer = torch.optim.Adam([{'params':model.parameters()},
-                                  {'params':likelihood.parameters()}], lr=0.1)
+                                  {'params':likelihood.parameters()}], lr=0.001)
+    # lr = 0.001
+    # optimizer = torch.optim.SGD([
+    #     {'params': model.hyperparameters(), 'lr': lr * 0.1},
+    #     {'params': model.variational_parameters()},
+    #     {'params': likelihood.parameters()},
+    # ], lr=lr, momentum=0.9, nesterov=True, weight_decay=0)
     num_epochs = 1000
     scheduler = MultiStepLR(optimizer, milestones=[0.5 * num_epochs, 0.75 * num_epochs], gamma=0.1)
     
@@ -118,6 +142,7 @@ def main(seed=2024):
     # model.train()
     # likelihood.train()
     # loss_list = []
+    # acc_list = []
     # epochs_iter = tqdm.tqdm(range(num_epochs), desc="Epoch")
     # beginning=timeit.default_timer()
     # for i in epochs_iter:
@@ -137,12 +162,13 @@ def main(seed=2024):
     #         loss_i += loss.item()
     #     scheduler.step()
     #     if i % 5 == 0:
-    #         print('Iter %d/%d - Loss: %.3f last layer lengthscale: %.3f   accuracy: %.4f' % (
+    #         print('Iter %d/%d - Loss: %.3f last layer lengthscale: %.3f  accuracy: %.4f' % (
     #             i + 1, num_epochs, loss.item(),
     #             model.layers[-1].covar_module.base_kernel.lengthscale.mean().item(),
     #             output.mean.mean(0).argmax(-1).eq(y_batch.argmax(-1)).mean(dtype=float).item()
     #         ))
     #     loss_i /= len(minibatch_iter)
+    #     acc_list.append(output.mean.mean(0).argmax(-1).eq(y_batch.argmax(-1)).mean(dtype=float).item())
     #     # record the loss and the best model
     #     loss_list.append(loss_i)
     #     if i==0:
@@ -159,7 +185,7 @@ def main(seed=2024):
     # model.load_state_dict(optim_model)
     # # prediction
     # model.eval()
-    # # likelihood.eval()
+    # likelihood.eval()
     # correct = 0
     # vars = []
     # lls = []
@@ -190,7 +216,7 @@ def main(seed=2024):
     # stats = np.array([ACC, STD, NLL, time_])
     # stats = np.array(['DeepGP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     # header = ['Method', 'ACC', 'STD', 'NLL', 'time']
-    # np.savetxt(os.path.join('./results/mnist_DGP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
+    # np.savetxt(os.path.join('./results',args.dataset_name+'_DGP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
 
     
     
@@ -251,7 +277,7 @@ def main(seed=2024):
             acc, std, nll = test(epoch)
             times[1] += timeit.default_timer()-beginning
             acc_list.append(acc); std_list.append(std); nll_list.append(nll)
-        scheduler.step()
+        # scheduler.step()
         state_dict = model.state_dict()
         likelihood_state_dict = likelihood.state_dict()
         torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dgp_'+str(model.num_layers)+'layers_'+args.dataset_name+'_checkpoint.dat'))

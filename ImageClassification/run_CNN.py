@@ -25,7 +25,7 @@ def main(seed=2024):
     print('Using the '+device+' device...')
     
     # load data and network model
-    train_loader, test_loader, model, num_classes = dataset(args.dataset_name, seed)
+    train_loader, test_loader, model, num_classes = dataset(args.dataset_name, seed, batch_size=256)
     
     # set device
     model = model.to(device)
@@ -34,8 +34,8 @@ def main(seed=2024):
     criterion = torch.nn.CrossEntropyLoss()
     
     # Use the adam optimizer
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     num_epochs = 1000#{'mnist':100, 'cifar10':500}[args.dataset_name]
     scheduler = MultiStepLR(optimizer, milestones=[0.5 * num_epochs, 0.75 * num_epochs], gamma=0.1)
     
@@ -84,7 +84,7 @@ def main(seed=2024):
         beginning=timeit.default_timer()
         acc_list.append(test(epoch))
         times[1] += timeit.default_timer()-beginning
-        scheduler.step()
+        # scheduler.step()
         state_dict = model.state_dict()
         torch.save({'model': state_dict}, os.path.join('./results','cnn_'+args.dataset_name+'_checkpoint.dat'))
     

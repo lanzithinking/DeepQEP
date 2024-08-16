@@ -1,9 +1,10 @@
 "Q-Exponential Process Classification Model"
 
 import os, argparse
-import torch
 import numpy as np
 import timeit
+
+import torch
 
 # gpytorch imports
 import sys

@@ -1,7 +1,8 @@
 "Deep Kernel Learning Gaussian Process Model"
 
 import os
-import math
+import random
+import numpy as np
 from matplotlib import pyplot as plt
 
 import torch
@@ -20,7 +21,15 @@ from gpytorch.mlls import VariationalELBO
 from gpytorch.likelihoods import MultitaskGaussianLikelihood
 
 # Setting manual seed for reproducibility
-torch.manual_seed(2024)
+seed=202408
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+torch.use_deterministic_algorithms(True)
 
 # generate data
 train_x = torch.linspace(0, 1, 100)
@@ -39,7 +48,7 @@ train_x = train_x.unsqueeze(-1)
 # define the NN feature extractor
 data_dim = train_x.size(-1)
 num_features = train_y.size(-1)
-hidden_features = [1000, 500, 100, 50]
+hidden_features = [1000, 500, 50]
 
 class FeatureExtractor(torch.nn.Sequential):
     def __init__(self, in_features, out_features, hidden_features=2):
@@ -82,16 +91,16 @@ class GaussianProcessLayer(ApproximateGP):
         # self.covar_module = ScaleKernel(
         #     RBFKernel(
         #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-        #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+        #             np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp
         #         ), batch_shape=batch_shape, ard_num_dims=input_dims
         #     )
         # )
         self.covar_module = ScaleKernel(
-            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims),
-            batch_shape=batch_shape, ard_num_dims=None,
-            lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
-            )
+            MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims,
+                # lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                #     np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp)
+            ),
+            batch_shape=batch_shape,
         )
 
     def forward(self, x):
@@ -140,7 +149,7 @@ model = MultitaskDKLGP(feature_extractor, output_dims=num_tasks)
 
 # training
 model.train()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 mll = VariationalELBO(model.likelihood, model.gp_layer, num_data=train_y.size(0))
 
 loss_list = []
@@ -172,6 +181,15 @@ with torch.no_grad(), gpytorch.settings.fast_pred_var():
     mean, var = model.predict(test_x)
     lower = mean - 2 * var.sqrt()
     upper = mean + 2 * var.sqrt()
+# truth
+test_y = torch.stack([
+    f['step'](test_x * 2),
+    f['turning'](test_x * 2),
+], -1)
+MAE = torch.mean(torch.abs(mean-test_y))
+RMSE = torch.mean(torch.pow(mean-test_y, 2)).sqrt()
+print('Test MAE: {}'.format(MAE))
+print('Test RMSE: {}'.format(RMSE))
 
 # Plot results
 fig, axs = plt.subplots(1, num_tasks+1, figsize=(4 * (num_tasks+1), 4))
@@ -181,12 +199,13 @@ for task, ax in enumerate(axs):
         ax.plot(train_x.squeeze(-1).detach().numpy(), train_y[:, task].detach().numpy(), 'k*')
         ax.plot(test_x.squeeze(-1).numpy(), mean[:, task].numpy(), 'b')
         ax.fill_between(test_x.squeeze(-1).numpy(), lower[:, task].numpy(), upper[:, task].numpy(), alpha=0.5)
-        ax.set_ylim([-1, 3])
-        ax.legend(['Truth','Observed Data', 'Mean', 'Confidence'])
-        ax.set_title(f'Task {task + 1}: '+list(f.keys())[task]+' function')
+        ax.set_ylim([-.5, 3])
+        ax.legend(['Truth','Observed Data', 'Mean', 'Confidence'], fontsize=12)
+        ax.set_title(f'Task {task + 1}: '+list(f.keys())[task]+' function', fontsize=20)
     else:
         ax.plot(loss_list)
-        ax.set_title('Neg. ELBO Loss')
+        ax.set_title('Neg. ELBO Loss', fontsize=20)
+    ax.tick_params(axis='both', which='major', labelsize=14)
 fig.tight_layout()
 
 # plt.show()
