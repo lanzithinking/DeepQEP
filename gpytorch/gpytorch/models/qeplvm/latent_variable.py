@@ -94,7 +94,7 @@ class VariationalLatentVariable(LatentVariable):
         from ...mlls import KLQExponentialAddedLossTerm
 
         # Variational distribution over the latent variable q(x)
-        q_x = QExponential(self.q_mu, torch.nn.functional.softplus(self.q_log_sigma))
+        q_x = QExponential(self.q_mu, torch.nn.functional.softplus(self.q_log_sigma), power=self.prior_x.power)
         x_kl = KLQExponentialAddedLossTerm(q_x, self.prior_x, self.n, self.data_dim)
         self.update_added_loss_term("x_kl", x_kl)  # Update the KL term
         return q_x.rsample()

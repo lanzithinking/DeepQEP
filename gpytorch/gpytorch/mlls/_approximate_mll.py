@@ -45,7 +45,7 @@ class _ApproximateMarginalLogLikelihood(MarginalLogLikelihood, ABC):
         Calling this function will call the likelihood's `expected_log_prob` function.
 
         Args:
-            approximate_dist_f (:obj:`gpytorch.distributions.MultivariateNormal`):
+            approximate_dist_f (:obj:`gpytorch.distributions.MultivariateNormal` or :obj:`gpytorch.distributions.MultivariateQExponential`):
                 :math:`q(\mathbf f)` the outputs of the latent function (the :obj:`gpytorch.models.ApproximateGP` or :obj:`gpytorch.models.ApproximateQEP`)
             target (`torch.Tensor`):
                 :math:`\mathbf y` The target values
