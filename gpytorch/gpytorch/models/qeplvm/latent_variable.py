@@ -75,7 +75,7 @@ class VariationalLatentVariable(LatentVariable):
     :param ~gpytorch.priors.Prior prior_x: prior for :math:`\\mathbf X`
     """
 
-    def __init__(self, n, data_dim, latent_dim, X_init, prior_x):
+    def __init__(self, n, data_dim, latent_dim, X_init, prior_x, **kwargs):
         super().__init__(n, latent_dim)
 
         self.data_dim = data_dim
@@ -88,13 +88,15 @@ class VariationalLatentVariable(LatentVariable):
         self.q_log_sigma = torch.nn.Parameter(torch.randn(n, latent_dim))
         # This will add the KL divergence KL(q(X) || p(X)) to the loss
         self.register_added_loss_term("x_kl")
+        
+        if 'power' in kwargs: self.power = kwargs.pop('power')
 
     def forward(self):
         from ...distributions import QExponential
         from ...mlls import KLQExponentialAddedLossTerm
 
         # Variational distribution over the latent variable q(x)
-        q_x = QExponential(self.q_mu, torch.nn.functional.softplus(self.q_log_sigma), power=self.prior_x.power)
+        q_x = QExponential(self.q_mu, torch.nn.functional.softplus(self.q_log_sigma), power=self.power if hasattr(self, 'power') else self.prior_x.power)
         x_kl = KLQExponentialAddedLossTerm(q_x, self.prior_x, self.n, self.data_dim)
         self.update_added_loss_term("x_kl", x_kl)  # Update the KL term
         return q_x.rsample()
