@@ -57,8 +57,8 @@ class QExponential(ExponentialFamily, Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super().__init__(batch_shape, validate_args=validate_args)
         self.power = power
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(QExponential, _instance)
