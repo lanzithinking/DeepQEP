@@ -89,14 +89,14 @@ class VariationalLatentVariable(LatentVariable):
         # This will add the KL divergence KL(q(X) || p(X)) to the loss
         self.register_added_loss_term("x_kl")
         
-        if 'power' in kwargs: self.power = kwargs.pop('power')
+        self.power = kwargs.pop('power', self.prior_x.power if hasattr(self.prior_x, 'power') else torch.tensor(2.0))
 
     def forward(self):
         from ...distributions import QExponential
         from ...mlls import KLQExponentialAddedLossTerm
 
         # Variational distribution over the latent variable q(x)
-        q_x = QExponential(self.q_mu, torch.nn.functional.softplus(self.q_log_sigma), power=self.power if hasattr(self, 'power') else self.prior_x.power)
+        q_x = QExponential(self.q_mu, torch.nn.functional.softplus(self.q_log_sigma), power=self.power)
         x_kl = KLQExponentialAddedLossTerm(q_x, self.prior_x, self.n, self.data_dim)
         self.update_added_loss_term("x_kl", x_kl)  # Update the KL term
         return q_x.rsample()
