@@ -7,6 +7,7 @@ from .multivariate_normal import MultivariateNormal
 from .multitask_multivariate_normal import MultitaskMultivariateNormal
 from .multivariate_qexponential import MultivariateQExponential
 from .multitask_multivariate_qexponential import MultitaskMultivariateQExponential
+from .power import Power
 
 # Get the set of distributions from either PyTorch or Pyro
 try:
@@ -17,4 +18,4 @@ except ImportError:
     import torch.distributions as base_distributions
 
 
-__all__ = ["Delta", "QExponential", "Distribution", "MultivariateNormal", "MultitaskMultivariateNormal", "MultivariateQExponential", "MultitaskMultivariateQExponential", "base_distributions"]
+__all__ = ["Delta", "QExponential", "Distribution", "MultivariateNormal", "MultitaskMultivariateNormal", "MultivariateQExponential", "MultitaskMultivariateQExponential", "Power", "base_distributions"]

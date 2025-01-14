@@ -117,16 +117,16 @@ class QExponential(ExponentialFamily, Distribution):
 
     @property
     def _natural_params(self):
-        if self.power==2:
-            return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
-        else:
+        if self.power!=2:
             raise ValueError(f"Q-Exponential distribution with power {self.power} does not belong to exponential family!")
+        else:
+            return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
 
     def _log_normalizer(self, x, y):
-        if self.power==2:
-            return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)
-        else:
+        if self.power!=2:
             raise ValueError(f"Q-Exponential distribution with power {self.power} does not belong to exponential family!")
+        else:
+            return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)
 
 
 @register_kl(QExponential, QExponential)

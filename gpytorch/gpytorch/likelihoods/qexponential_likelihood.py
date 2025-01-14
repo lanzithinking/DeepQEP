@@ -35,6 +35,7 @@ class _QExponentialLikelihoodBase(Likelihood):
 
         self.noise_covar = noise_covar
         self.power = kwargs.pop('power', torch.tensor(2.0))
+        self.miu = kwargs.pop('miu', True) # marginally identical but uncorrelated
 
     def _shaped_noise_covar(self, base_shape: torch.Size, *params: Any, **kwargs: Any) -> Union[Tensor, LinearOperator]:
         return self.noise_covar(*params, shape=base_shape, **kwargs)
@@ -63,17 +64,26 @@ class _QExponentialLikelihoodBase(Likelihood):
             target = settings.observation_nan_policy._fill_tensor(target)
 
         mean, variance, power = input.mean, input.variance, self.power
-        trace_plus_inv_quad_form = ((target - mean).square() + variance) / noise
-        res = trace_plus_inv_quad_form**(power/2.) + noise.log() + math.log(2 * math.pi)
-        res = res.mul(-0.5)
-        if power!=2: res += 0.5 * (power/2.-1) * trace_plus_inv_quad_form.log() + torch.log(power/2.) # exact value is intractable; only lower bound is provided.
+        trace_plus_inv_quad_form = ((target - mean).square() + variance) / noise # <r>
+        res = noise.log() + math.log(2 * math.pi) #+ trace_plus_inv_quad_form**(power/2.)
+        # res = res.mul(-0.5)
+        # if power!=2: res += 0.5 * (power/2.-1) * trace_plus_inv_quad_form.log() + torch.log(power/2.) # exact value is intractable; only lower bound is provided.
 
         if nan_policy == "fill":
-            res = res * ~missing
+            # res = res * ~missing
+            trace_plus_inv_quad_form = trace_plus_inv_quad_form * ~missing
 
         # Do appropriate summation for multitask QExponential likelihoods
         num_event_dim = len(input.event_shape)
-        if num_event_dim > 1:
+        if num_event_dim > 1 and self.miu:
+            res = res.sum(list(range(-1, -num_event_dim, -1)))
+            trace_plus_inv_quad_form = trace_plus_inv_quad_form.sum(list(range(-1, -num_event_dim, -1)))
+        
+        res += trace_plus_inv_quad_form**(power/2.)
+        res = res.mul(-0.5)
+        if power!=2: res += 0.5 * (power/2.-1) * trace_plus_inv_quad_form.log() * (torch.tensor(input.event_shape[-1:-num_event_dim:-1]).prod() if self.miu else 1.0) + torch.log(power/2.) # exact value is intractable; only lower bound is provided.
+
+        if num_event_dim > 1 and not self.miu:
             res = res.sum(list(range(-1, -num_event_dim, -1)))
 
         return res
@@ -103,16 +113,20 @@ class _QExponentialLikelihoodBase(Likelihood):
             missing = torch.isnan(observations)
             observations = settings.observation_nan_policy._fill_tensor(observations)
 
-        # We're making everything conditionally independent ?
-        indep_dist = QExponential(marginal.mean, marginal.variance.clamp_min(1e-8).sqrt(), marginal.power)
-        res = indep_dist.log_prob(observations)
+        if self.miu:
+            marginal = marginal.to_data_uncorrelated_dist()
+            res = marginal.log_prob(observations)
+        else:
+            # We're making everything conditionally independent ?
+            indep_dist = QExponential(marginal.mean, marginal.variance.clamp_min(1e-8).sqrt(), marginal.power)
+            res = indep_dist.log_prob(observations)
 
         if nan_policy == "fill":
             res = res * ~missing
 
         # Do appropriate summation for multitask QExponential likelihoods
         num_event_dim = len(marginal.event_shape)
-        if num_event_dim > 1:
+        if num_event_dim > 1 and not self.miu:
             res = res.sum(list(range(-1, -num_event_dim, -1)))
         return res
 

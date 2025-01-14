@@ -61,6 +61,7 @@ class HalfNormalPrior(Prior, HalfNormal):
     def __init__(self, scale, validate_args=None, transform=None):
         TModule.__init__(self)
         HalfNormal.__init__(self, scale=scale, validate_args=validate_args)
+        _bufferize_attributes(self, ("scale",))
         self._transform = transform
 
     def expand(self, batch_shape):
@@ -75,6 +76,7 @@ class LogNormalPrior(Prior, LogNormal):
     def __init__(self, loc, scale, validate_args=None, transform=None):
         TModule.__init__(self)
         LogNormal.__init__(self, loc=loc, scale=scale, validate_args=validate_args)
+        _bufferize_attributes(self, ("loc", "scale"))
         self._transform = transform
 
     def expand(self, batch_shape):
@@ -105,6 +107,7 @@ class HalfCauchyPrior(Prior, HalfCauchy):
     def __init__(self, scale, validate_args=None, transform=None):
         TModule.__init__(self)
         HalfCauchy.__init__(self, scale=scale, validate_args=validate_args)
+        _bufferize_attributes(self, ("scale",))
         self._transform = transform
 
     def expand(self, batch_shape):

@@ -205,6 +205,7 @@ class MultitaskQExponentialLikelihood(_MultitaskQExponentialLikelihoodBase):
     ) -> None:
         super(Likelihood, self).__init__()  # pyre-ignore[20]
         self.power = kwargs.pop('power', torch.tensor(2.0))
+        self.miu = kwargs.pop('miu', True) # marginally identical but uncorrelated
         if noise_constraint is None:
             noise_constraint = GreaterThan(1e-4)
 

@@ -161,3 +161,4 @@ cython_debug/
 
 # ignore the following folders
 CT/
+GPyTorch_/
