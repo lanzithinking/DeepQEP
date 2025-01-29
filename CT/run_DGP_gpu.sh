@@ -2,7 +2,7 @@
 
 #SBATCH -N 1            # number of nodes
 #SBATCH -c 1            # number of cores 
-#SBATCH --mem=96G       # amount of RAM requested in GiB (2^40)
+#SBATCH --mem=128G       # amount of RAM requested in GiB (2^40)
 #SBATCH -t 0-02:00:00   # time in d-hh:mm:ss
 #SBATCH -p general      # partition 
 #SBATCH -q public       # QOS
@@ -25,6 +25,11 @@ source ${HOME}/miniconda3/bin/activate pytorch
 cd ~/Projects/Deep-QEP/code/CT
 
 # run python script
+if [ $# -eq 0 ]; then
+	n_angles=90
+elif [ $# -eq 1 ]; then
+	n_angles="$1"
+fi
 
-python -u run_Deep_QEP.py #> Deep_QEP.log &
-# sbatch --job-name=DeepQEP --output=Deep_QEP.log CT_DQEP_gpu.sh
+python -u run_Deep_GP.py ${n_angles} #> Deep_GP.log &
+# sbatch --job-name=DeepGP --output=Deep_GP.log run_DGP_gpu.sh

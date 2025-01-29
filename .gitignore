@@ -160,5 +160,5 @@ cython_debug/
 #.idea/
 
 # ignore the following folders
-CT/
 GPyTorch_/
+ImageClassification/

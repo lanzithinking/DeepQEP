@@ -1,10 +1,10 @@
 "Deep Gaussian Process Classification Model"
 
 import os, argparse
-import math
 import random
 import numpy as np
 import timeit
+from sklearn.metrics import roc_auc_score
 
 import torch
 import tqdm
@@ -29,8 +29,10 @@ def main(seed=2024):
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_name', nargs='?', type=str, default='cifar10')
     parser.add_argument('batch_size', nargs='?', type=int, default=256)
+    parser.add_argument('seed', nargs='?', type=int, default=2024)
     args = parser.parse_args()
     # Setting manual seed for reproducibility
+    seed = args.seed
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -68,14 +70,14 @@ def main(seed=2024):
             # self.covar_module = ScaleKernel(
             #     RBFKernel(
             #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-            #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
+            #             np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp
             #         )
             #     )
             # )
             self.covar_module = ScaleKernel(
                 MaternKernel(nu=1.5, batch_shape=batch_shape, ard_num_dims=input_dims,
-                    lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-                        math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp)
+                    # lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
+                    #     np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp)
                 ),
                 batch_shape=batch_shape,
             )
@@ -86,10 +88,8 @@ def main(seed=2024):
             return MultivariateNormal(mean_x, covar_x)
     
     # define the main model
-    hidden_features = [5]
-    
     class clsDeepGP(DeepGP):
-        def __init__(self, in_features, out_features, hidden_features=2):
+        def __init__(self, in_features, out_features, hidden_features=2, likelihood=None):
             super().__init__()
             if isinstance(hidden_features, int):
                 layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
@@ -104,6 +104,7 @@ def main(seed=2024):
                 ))
             self.num_layers = len(layers)
             self.layers = torch.nn.Sequential(*layers)
+            self.likelihood = likelihood
     
         def forward(self, inputs):
             output = self.layers[0](inputs)
@@ -112,57 +113,42 @@ def main(seed=2024):
             return output
     
     # define likelihood and model
+    hidden_features = [5]
     likelihood = MultitaskDirichletClassificationLikelihood(torch.tensor(getattr(train_loader.dataset,{'mnist':'train_labels','cifar10':'targets'}[args.dataset_name])), learn_additional_noise=True)
     likelihood.has_global_noise = True
-    def _prepare_targets(targets, alpha_epsilon= 0.01, dtype=torch.float, num_classes=None):
-            if num_classes is None:
-                num_classes = int(targets.max() + 1)
-            # set alpha = \alpha_\epsilon
-            alpha = alpha_epsilon * torch.ones(targets.shape[-1], num_classes, device=targets.device, dtype=dtype)
-    
-            # alpha[class_labels] = 1 + \alpha_\epsilon
-            alpha[torch.arange(len(targets)), targets] = alpha[torch.arange(len(targets)), targets] + 1.0
-    
-            # sigma^2 = log(1 / alpha + 1)
-            sigma2_i = torch.log(alpha.reciprocal() + 1.0)
-    
-            # y = log(alpha) - 0.5 * sigma^2
-            transformed_targets = alpha.log() - 0.5 * sigma2_i
-    
-            return sigma2_i.transpose(-2, -1).type(dtype), transformed_targets.type(dtype), num_classes
-    likelihood._prepare_targets = _prepare_targets
-    model = clsDeepGP(in_features=input_dim, out_features=num_classes, hidden_features=hidden_features)
+    model = clsDeepGP(in_features=input_dim, out_features=num_classes, hidden_features=hidden_features, likelihood=likelihood)
     # set device
     model = model.to(device)
-    likelihood = likelihood.to(device)
+    # likelihood = likelihood.to(device)
     
     # "Loss" for GPs - the marginal log likelihood
     # mll = VariationalELBO(likelihood, model, num_data=len(train_loader.dataset))
-    mll = DeepApproximateMLL(VariationalELBO(likelihood, model, num_data=len(train_loader.dataset)))
+    mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=len(train_loader.dataset)))
     
     # Use the adam optimizer
-    optimizer = torch.optim.Adam([{'params':model.parameters()},
-                                  {'params':likelihood.parameters()}], lr=0.001)
+    # optimizer = torch.optim.Adam([{'params':model.parameters()},
+    #                               {'params':likelihood.parameters()}], lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     # lr = 0.001
     # optimizer = torch.optim.SGD([
     #     {'params': model.hyperparameters(), 'lr': lr * 0.1},
     #     {'params': model.variational_parameters()},
     #     {'params': likelihood.parameters()},
     # ], lr=lr, momentum=0.9, nesterov=True, weight_decay=0)
-    num_epochs = 2000
+    num_epochs = 1000
     scheduler = MultiStepLR(optimizer, milestones=[0.5 * num_epochs, 0.75 * num_epochs], gamma=0.1)
     
     # define training and testing procedures
     def train(epoch):
         model.train()
-        likelihood.train()
+        # likelihood.train()
     
         minibatch_iter = tqdm.tqdm(train_loader, desc=f"(Epoch {epoch}) Minibatch")
         for data, target in minibatch_iter:
             if torch.cuda.is_available():
                 data, target = data.cuda(), target.cuda()
             optimizer.zero_grad()
-            output = model(data.flatten(1))
+            output = model(data.reshape((data.shape[0],-1)))
             loss = -mll(output, likelihood._prepare_targets(target,num_classes=likelihood.num_classes)[1]).sum()
             loss.backward()
             optimizer.step()
@@ -171,31 +157,38 @@ def main(seed=2024):
     
     def test(epoch):
         model.eval()
-        likelihood.eval()
+        # likelihood.eval()
     
         correct = 0
-        vars = []
-        lls = []
+        lls, aucs = [], []
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
             for data, target in test_loader:
                 if torch.cuda.is_available():
                     data, target = data.cuda(), target.cuda()
-                appx_dist = model(data.flatten(1))
-                pred = appx_dist.mean.mean(0).argmax(-1)
+                appx_dist = model(data.reshape((data.shape[0],-1)))
+                pred_mean = appx_dist.mean.mean(0)
+                col_max, pred = torch.max(pred_mean,-1)
                 correct += pred.eq(target.view_as(pred)).cpu().sum()
-                vars.append(appx_dist.variance.mean(0).median(-1)[0].cpu())
-                lls.append(likelihood.log_marginal(target[:,None], appx_dist).mean(0).cpu())
+                trans_target = model.likelihood._prepare_targets(target, num_classes=model.likelihood.num_classes)[1]
+                lls.append(model.likelihood.log_marginal(trans_target, appx_dist).mean(0).cpu())
+                y_score = torch.exp(pred_mean[:,torch.unique(target)] - col_max[:,None])
+                y_score /= y_score.sum(1,keepdims=True)
+                aucs.append(roc_auc_score(target.cpu(), y_score.cpu(), multi_class='ovo'))
+        aucs = np.stack(aucs); lls = torch.cat(lls, 0)
         acc = correct / float(len(test_loader.dataset))
-        print('Epoch {}: test set: Accuracy: {}/{} ({}%)'.format(
-            epoch, correct, len(test_loader.dataset), 100. * acc
+        auc = aucs.mean().item()
+        nll = -lls.mean().item()
+        print('Epoch {}: test set: Accuracy: {}/{} ({}%), AUC: {}'.format(
+            epoch, correct, len(test_loader.dataset), 100. * acc, auc
         ))
-        return acc.item(), torch.cat(vars, 0).sqrt().mean().item(), -torch.cat(lls, 0).mean().item()
+        return acc, auc, nll
     
     # Train the model
     os.makedirs('./results', exist_ok=True)
+    f_name = args.dataset_name+'_DGP_dirichlet_'+str(model.num_layers)+'layers_seedNO'+str(seed)
     loss_list = []
     acc_list = []
-    std_list = []
+    auc_list = []
     nll_list = []
     times = np.zeros(2)
     for epoch in range(1, num_epochs + 1):
@@ -204,30 +197,32 @@ def main(seed=2024):
             loss_list.append(train(epoch))
             times[0] += timeit.default_timer()-beginning
             beginning=timeit.default_timer()
-            acc, std, nll = test(epoch)
+            acc, auc, nll = test(epoch)
             times[1] += timeit.default_timer()-beginning
-            acc_list.append(acc); std_list.append(std); nll_list.append(nll)
-        scheduler.step()
+            acc_list.append(acc); auc_list.append(auc); nll_list.append(nll)
+        # scheduler.step()
         state_dict = model.state_dict()
-        likelihood_state_dict = likelihood.state_dict()
-        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results','dgp_'+str(model.num_layers)+'layers_'+args.dataset_name+'_checkpoint.dat'))
+        likelihood_state_dict = model.likelihood.state_dict()
+        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, os.path.join('./results',f_name+'_checkpoint.dat'))
     
     # save to file
-    stats = np.array([acc_list[-1], std_list[-1], nll_list[-1], times.sum()])
+    stats = np.array([acc_list[-1], auc_list[-1], nll_list[-1], times.sum()])
     stats = np.array(['DGP']+[np.array2string(r, precision=4) for r in stats])[None,:]
-    header = ['Method', 'ACC', 'STD', 'NLL', 'time']
-    np.savetxt(os.path.join('./results',args.dataset_name+'_DGP_'+str(model.num_layers)+'layers.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
-    np.savez_compressed(os.path.join('./results',args.dataset_name+'_DGP_'+str(model.num_layers)+'layers'), loss=np.stack(loss_list), acc=np.stack(acc_list), std=np.stack(std_list), nll=np.stack(nll_list), times=times)
+    header = ['Method', 'ACC', 'AUC', 'NLL', 'time']
+    np.savetxt(os.path.join('./results',f_name+'.txt'),stats,fmt="%s",delimiter=',',header=','.join(header))
+    np.savez_compressed(os.path.join('./results',f_name), loss=np.stack(loss_list), acc=np.stack(acc_list), auc=np.stack(auc_list), nll=np.stack(nll_list), times=times)
     
     # plot the result
     import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(1,2, figsize=(10,4))
+    fig, axes = plt.subplots(1,3, figsize=(15,4))
     axes[0].plot(loss_list)
     axes[0].set_ylabel('Negative ELBO loss')
     axes[1].plot(acc_list)
     axes[1].set_ylabel('Accuracy')
+    axes[2].plot(auc_list)
+    axes[2].set_ylabel('AUC')
     plt.subplots_adjust(wspace=0.2, hspace=0.2)
-    plt.savefig(os.path.join('./results',args.dataset_name+'_DGP_'+str(model.num_layers)+'layers.png'), bbox_inches='tight')
+    plt.savefig(os.path.join('./results',f_name+'.png'), bbox_inches='tight')
 
 if __name__ == '__main__':
     main()

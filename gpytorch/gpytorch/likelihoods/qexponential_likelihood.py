@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any, Optional, Tuple, Union
 
 import torch
-from linear_operator.operators import LinearOperator, MaskedLinearOperator, ZeroLinearOperator
+from linear_operator.operators import LinearOperator, MaskedLinearOperator, ZeroLinearOperator, DiagLinearOperator
 from torch import Tensor
 from torch.distributions import Distribution
 
@@ -35,7 +35,7 @@ class _QExponentialLikelihoodBase(Likelihood):
 
         self.noise_covar = noise_covar
         self.power = kwargs.pop('power', torch.tensor(2.0))
-        self.miu = kwargs.pop('miu', True) # marginally identical but uncorrelated
+        self.miu = kwargs.pop('miu', False) # marginally identical but uncorrelated
 
     def _shaped_noise_covar(self, base_shape: torch.Size, *params: Any, **kwargs: Any) -> Union[Tensor, LinearOperator]:
         return self.noise_covar(*params, shape=base_shape, **kwargs)
@@ -114,10 +114,13 @@ class _QExponentialLikelihoodBase(Likelihood):
             observations = settings.observation_nan_policy._fill_tensor(observations)
 
         if self.miu:
-            marginal = marginal.to_data_uncorrelated_dist()
-            res = marginal.log_prob(observations)
+            if type(marginal) is MultivariateQExponential:
+                marginal = marginal.to_data_uncorrelated_dist()
+            else:
+                marginal.lazy_covariance_matrix = DiagLinearOperator(marginal.lazy_covariance_matrix.diagonal(dim1=-1, dim2=-2))
+            res = marginal.log_prob(observations)/marginal.event_shape[0]
         else:
-            # We're making everything conditionally independent ?
+            # We're making everything conditionally independent
             indep_dist = QExponential(marginal.mean, marginal.variance.clamp_min(1e-8).sqrt(), marginal.power)
             res = indep_dist.log_prob(observations)
 
@@ -411,9 +414,9 @@ class QExponentialDirichletClassificationLikelihood(FixedNoiseQExponentialLikeli
     """
 
     def _prepare_targets(
-        self, targets: Tensor, alpha_epsilon: float = 0.01, dtype: torch.dtype = torch.float
+        self, targets: Tensor, num_classes: Optional = None, alpha_epsilon: float = 0.01, dtype: torch.dtype = torch.float
     ) -> Tuple[Tensor, Tensor, int]:
-        num_classes = int(targets.max() + 1)
+        if num_classes is None: num_classes = int(targets.max() + 1)
         # set alpha = \alpha_\epsilon
         alpha = alpha_epsilon * torch.ones(targets.shape[-1], num_classes, device=targets.device, dtype=dtype)
 

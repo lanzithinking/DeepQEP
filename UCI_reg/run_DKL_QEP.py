@@ -1,6 +1,7 @@
 "Deep Kernel Learning Q-Exponential Process Model"
 
 import os, argparse
+import random
 import numpy as np
 import timeit
 
@@ -32,7 +33,14 @@ def main(seed=2024):
     args = parser.parse_args()
     
     # Setting manual seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # torch.use_deterministic_algorithms(True)
     
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -64,10 +72,6 @@ def main(seed=2024):
     
     
     # define the NN feature extractor
-    data_dim = train_x.size(-1)
-    num_features = train_y.size(-1)
-    hidden_features = [1000, 500, 50]
-    
     class FeatureExtractor(torch.nn.Sequential):
         def __init__(self, in_features, out_features, hidden_features=2):
             super(FeatureExtractor, self).__init__()
@@ -83,6 +87,9 @@ def main(seed=2024):
             self.num_layers = len(layers)
             self.layers = torch.nn.Sequential(*layers)
     
+    data_dim = train_x.size(-1)
+    num_features = train_y.size(-1)
+    hidden_features = [1000, 500, 50]
     feature_extractor = FeatureExtractor(in_features=data_dim, out_features=num_features, hidden_features=hidden_features)
     
     
@@ -119,7 +126,7 @@ def main(seed=2024):
                     # lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
                     #     np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp)
                 ),
-                batch_shape=batch_shape,
+                batch_shape=batch_shape, ard_num_dims=None
             )
     
         def forward(self, x):
@@ -129,8 +136,6 @@ def main(seed=2024):
     
     
     # define the main model
-    num_tasks = train_y.size(-1)
-    
     class MultitaskDKLQEP(gpytorch.Module):
         def __init__(self, feature_extractor, output_dims, grid_bounds=(-10., 10.)):
             super(MultitaskDKLQEP, self).__init__()
@@ -149,20 +154,20 @@ def main(seed=2024):
             res = self.qep_layer(features)
             return res
     
-        def predict(self, test_x):
+        def predict(self, test_loader):
+            means, vars, lls = [], [], []
             with torch.no_grad():
+                for x_batch, y_batch in test_loader:
+                    output = self(x_batch)
+                    preds = self.likelihood(output)
+                    means.append(preds.mean.cpu())
+                    vars.append(preds.variance.cpu())
+                    ll = self.likelihood.log_marginal(y_batch, output).cpu()
+                    if self.likelihood.miu: ll = ll.reshape(1)
+                    lls.append(ll)
+            return torch.cat(means, 0), torch.cat(vars, 0), torch.cat(lls, 0)
     
-                # The output of the model is a multitask MVN, where both the data points
-                # and the tasks are jointly distributed
-                # To compute the marginal predictive NLL of each data point,
-                # we will call `to_data_independent_dist`,
-                # which removes the data cross-covariance terms from the distribution.
-                preds = model.likelihood(model(test_x)).to_data_independent_dist()
-    
-            # return preds.mean.mean(0), preds.variance.mean(0)
-            return preds.mean, preds.variance
-    
-    
+    num_tasks = train_y.size(-1)
     model = MultitaskDKLQEP(feature_extractor, output_dims=num_tasks)
     # set device
     model = model.to(device)
@@ -206,44 +211,34 @@ def main(seed=2024):
     model.load_state_dict(optim_model)
     # Make predictions
     model.eval()
-    means = []
-    vars = []
-    lls = []
-    with torch.no_grad():#, gpytorch.settings.fast_pred_var():
-        for x_batch, y_batch in test_loader:
-            # mean, var = model.predict(x_batch)
-            # means = torch.cat([means, mean.cpu()])
-            # vars = torch.cat([means, var.cpu()])
-            preds = model(x_batch)
-            means.append(preds.mean.cpu())
-            vars.append(preds.variance.cpu())
-            lls.append(model.likelihood.log_marginal(y_batch, preds).cpu())
-    means = torch.cat(means, 0)
-    vars = torch.cat(vars, 0)
-    lls = torch.cat(lls, 0)
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        means, vars, lls = model.predict(test_loader)
     
     MAE = torch.mean(torch.abs(means - test_y.cpu())).item()
     RMSE = torch.mean(torch.pow(means - test_y.cpu(), 2)).sqrt().item()
-    STD = torch.mean(vars.sqrt()).item()
+    PSD = torch.mean(vars.sqrt()).item()
     NLL = -lls.mean().item()
+    from sklearn.metrics import r2_score
+    R2 = r2_score(test_y.cpu(), means).mean()
     print('Test MAE: {}'.format(MAE))
     print('Test RMSE: {}'.format(RMSE))
-    print('Test std: {}'.format(STD))
+    print('Test PSD: {}'.format(PSD))
+    print('Test R2: {}'.format(R2))
     print('Test NLL: {}'.format(NLL))
     
     # save to file
     os.makedirs('./results', exist_ok=True)
-    stats = np.array([MAE, RMSE, STD, NLL, time_])
+    stats = np.array([MAE, RMSE, PSD, R2, NLL, time_])
     stats = np.array([seed,'DKLQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
-    header = ['seed', 'Method', 'MAE', 'RMSE', 'STD', 'NLL', 'time']
+    header = ['seed', 'Method', 'MAE', 'RMSE', 'PSD', 'R2', 'NLL', 'time']
     f_name = os.path.join('./results',args.dataset_name+'_DKLQEP_'+str(model.feature_extractor.num_layers)+'layers.txt')
     with open(f_name,'ab') as f:
         np.savetxt(f,stats,fmt="%s",delimiter=',',header=','.join(header) if seed==2024 else '')
 
 if __name__ == '__main__':
     # main()
-    n_seed = 10; i=0; n_success=0
-    while n_success < n_seed:
+    n_seed = 10; i=0; n_success=0; n_failure=0
+    while n_success < n_seed and n_failure < 10* n_seed:
         seed_i=2024+i*10
         try:
             print("Running for seed %d ...\n"% (seed_i))
@@ -251,5 +246,6 @@ if __name__ == '__main__':
             n_success+=1
         except Exception as e:
             print(e)
+            n_failure+=1
             pass
         i+=1

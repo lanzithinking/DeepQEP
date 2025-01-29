@@ -5,7 +5,8 @@ import numpy as np
 
 os.makedirs('./results', exist_ok=True)
 
-datasets=('car', 'haberman', 'nursery', 'tic_tac_toe', 'website_phishing', 'seismic')
+datasets=('haberman', 'dermatology', 'tic_tac_toe', 'car',  'nursery')#, 'seismic', 'website_phishing')
+# datasets=('adult', 'diabetic_retinopathy', 'ecoli', 'eeg_eyes', 'ionosphere', 'seeds', 'teaching_assistant', 'website_phishing', 'wholesale_customers')
 num_datasets=len(datasets)
 algs=('DGP', 'DQEP', 'DKLGP', 'DKLQEP', 'DSPP')
 alg_names=('DeepGP', 'DeepQEP', 'DKLGP', 'DKLQEP', 'DSPP')

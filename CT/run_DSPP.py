@@ -1,4 +1,4 @@
-"Deep Q-Exponential Process Model"
+"Deep Sigma Point Process Model"
 
 import os,argparse,pickle
 import random
@@ -18,13 +18,13 @@ sys.path.insert(0,'../GPyTorch')
 import gpytorch
 from gpytorch.means import ConstantMean, LinearMean
 from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, LinearKernel, RFFKernel
-from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution
-from gpytorch.distributions import MultivariateQExponential
-from gpytorch.models.qeplvm.latent_variable import *
-from gpytorch.models.deep_qeps import DeepQEPLayer, DeepQEP
-from gpytorch.mlls import DeepApproximateMLL, VariationalELBO
-from gpytorch.priors import QExponentialPrior
-from gpytorch.likelihoods import MultitaskQExponentialLikelihood
+from gpytorch.variational import VariationalStrategy, CholeskyVariationalDistribution, LMCVariationalStrategy
+from gpytorch.distributions import MultivariateNormal
+from gpytorch.models.gplvm.latent_variable import *
+from gpytorch.models.deep_gps.dspp import DSPPLayer, DSPP
+from gpytorch.mlls import DeepPredictiveLogLikelihood
+from gpytorch.priors import NormalPrior
+from gpytorch.likelihoods import MultitaskGaussianLikelihood
 
 # image reconstruction metrics
 def PSNR(reco, gt):
@@ -64,19 +64,15 @@ def main(seed=2024):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using the '+device+' device...')
     
-    POWER = torch.tensor(1.0, device=device)
-    
     # Here's a simple standard layer
-    class DQEPLayer(DeepQEPLayer):
-        def __init__(self, input_dims, output_dims, num_inducing=200, mean_type='constant', **kwargs):
-            self.power = POWER
-            inducing_points = torch.randn(output_dims, num_inducing, input_dims, device=device)
+    class DSPP_Layer(DSPPLayer):
+        def __init__(self, input_dims, output_dims, num_inducing=200, mean_type='constant', Q=8, **kwargs):
+            inducing_points = torch.randn(output_dims, num_inducing, input_dims)
             batch_shape = torch.Size([output_dims])
     
             variational_distribution = CholeskyVariationalDistribution(
                 num_inducing_points=num_inducing,
-                batch_shape=batch_shape,
-                power=self.power
+                batch_shape=batch_shape
             )
             variational_strategy = VariationalStrategy(
                 self,
@@ -85,14 +81,14 @@ def main(seed=2024):
                 learn_inducing_locations=True
             )
     
-            super().__init__(variational_strategy, input_dims, output_dims)
+            super().__init__(variational_strategy, input_dims, output_dims, Q)
             n = kwargs.pop('n',1); 
-            # self.mean_module = ConstantMean() if not linear_mean else LinearMean(n)#input_dims)
+            # self.mean_module = ConstantMean() if linear_mean else LinearMean(input_dims)
             self.mean_module = {'constant': ConstantMean(), 'linear': LinearMean(n)}[mean_type]
             # self.covar_module = ScaleKernel(
             #     RBFKernel(batch_shape=batch_shape, ard_num_dims=input_dims,
             #         lengthscale_prior=gpytorch.priors.SmoothedBoxPrior(
-            #             np.exp(-1), np.exp(1), sigma=0.1, transform=torch.exp
+            #             math.exp(-1), math.exp(1), sigma=0.1, transform=torch.exp
             #         )
             #     )
             # )
@@ -111,8 +107,8 @@ def main(seed=2024):
             
             # LatentVariable (c)
             data_dim = output_dims; latent_dim = input_dims
-            latent_prior_mean = torch.zeros(n, latent_dim, device=device)
-            latent_prior = QExponentialPrior(latent_prior_mean, torch.ones_like(latent_prior_mean)*1000, power=self.power)
+            latent_prior_mean = torch.zeros(n, latent_dim)
+            latent_prior = NormalPrior(latent_prior_mean, torch.ones_like(latent_prior_mean)*100)
             latent_init = kwargs.pop('latent_init', None)
             if latent_init is not None:
                 self.latent_variable = VariationalLatentVariable(n, data_dim, latent_dim, torch.nn.Parameter(latent_init), latent_prior)
@@ -125,19 +121,19 @@ def main(seed=2024):
             x_ = x if projection is None else torch.bmm(x, projector)#.permute((1,2,0)))
             mean_x = self.mean_module(x_)
             covar_x = self.covar_module(x_)
-            return MultivariateQExponential(mean_x, covar_x, power=self.power)
+            return MultivariateNormal(mean_x, covar_x)
     
     # define the main model
-    class MultitaskDeepQEP(DeepQEP):
+    class MultitaskDSPP(DSPP):
         def __init__(self, n, in_features, out_features, hidden_features=2, latent_init=None):
-            super().__init__()
+            super().__init__(num_quadrature_sites)
             if isinstance(hidden_features, int):
                 layer_config = torch.cat([torch.arange(in_features, out_features, step=(out_features-in_features)/max(1,hidden_features)).type(torch.int), torch.tensor([out_features])])
             elif isinstance(hidden_features, list):
                 layer_config = [in_features]+hidden_features+[out_features]
             layers = []
             for i in range(len(layer_config)-1):
-                layers.append(DQEPLayer(
+                layers.append(DSPP_Layer(
                     input_dims=layer_config[i],
                     output_dims=layer_config[i+1],
                     mean_type='linear' if i < len(layer_config)-2 else 'constant',
@@ -148,7 +144,7 @@ def main(seed=2024):
             self.layers = torch.nn.Sequential(*layers)
     
             # We're going to use a ultitask likelihood instead of the standard GaussianLikelihood
-            self.likelihood = MultitaskQExponentialLikelihood(num_tasks=out_features, power=POWER, miu=False)
+            self.likelihood = MultitaskGaussianLikelihood(num_tasks=out_features)
     
         def forward(self, inputs):
             output = self.layers[0](inputs, projection=projector)#, are_samples=True)
@@ -161,17 +157,17 @@ def main(seed=2024):
     latent_dim = projector.shape[1]
     num_tasks = sinogram.size(-1)
     hidden_features = [num_tasks]+[10]*4
+    num_quadrature_sites = 8
     lsqr = True
     latent_init=torch.tensor(spsla.lsqr(A=proj, b=sino, damp=0.1)[0], dtype=torch.float32)+1e-4*torch.rand(n, latent_dim) if lsqr else torch.randn(n, latent_dim)
-    model = MultitaskDeepQEP(n, latent_dim, num_tasks, hidden_features, latent_init)
+    model = MultitaskDSPP(n, latent_dim, num_tasks, hidden_features, latent_init)
     
     # training
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
-    mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, num_data=n, beta=1000))
+    mll = DeepPredictiveLogLikelihood(model.likelihood, model, num_data=n, beta=100)
     
     # set device
-    # POWER = POWER.to(device)
     projector = projector.to(device)
     sinogram = sinogram.to(device)
     model = model.to(device)
@@ -179,7 +175,7 @@ def main(seed=2024):
     
     loss_list = []
     num_epochs = 10000
-    iterator = tqdm.tqdm(range(num_epochs), desc="Epoch", file=open(os.devnull, 'w'))
+    iterator = tqdm.tqdm(range(num_epochs), desc="Epoch")
     beginning=timeit.default_timer()
     for i in iterator:
         optimizer.zero_grad()
@@ -188,7 +184,6 @@ def main(seed=2024):
         output = model(sample)
         loss = -mll(output, sinogram).sum()
         # iterator.set_postfix(loss=loss.item())
-        # iterator.set_description('Loss: ' + str(float(np.round(loss.item(),2))) + ", iter no: " + str(i))
         loss.backward()
         optimizer.step()
         # record the loss and the best model
@@ -223,13 +218,13 @@ def main(seed=2024):
     
     # save to file
     os.makedirs('./results', exist_ok=True)
-    filename = 'CT_proj'+str(args.n_angles)+'_DQEP_'+str(model.num_layers)+'layers'
+    filename = 'CT_proj'+str(args.n_angles)+'_DSPP_'+str(model.num_layers)+'layers'
     f=open(os.path.join('./results',filename+'_seed'+str(seed)+'.pckl'),'wb')
     pickle.dump([truth, X, loss_list],f)
     f.close()
     # stats = np.array([rem, psnr, ssim, haarpsi, time_])
     stats = np.array([rem, psnr, haarpsi, time_])
-    stats = np.array([seed,'DeepQEP']+[np.array2string(r, precision=4) for r in stats])[None,:]
+    stats = np.array([seed,'DSPP']+[np.array2string(r, precision=4) for r in stats])[None,:]
     # header = ['seed', 'Method', 'REM', 'PSNR', 'SSIM', 'HaarPSI', 'time']
     header = ['seed', 'Method', 'REM', 'PSNR', 'HaarPSI', 'time']
     with open(os.path.join('./results',filename+'.txt'),'ab') as f_:

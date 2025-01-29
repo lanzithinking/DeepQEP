@@ -1,8 +1,10 @@
 "Deep Q-Exponential Process Classification Model"
 
 import os, argparse
+import random
 import numpy as np
 import timeit
+from sklearn.metrics import roc_auc_score
 
 import torch
 import tqdm
@@ -34,7 +36,11 @@ def main(seed=2024):
     args = parser.parse_args()
     
     # Setting manual seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     
     # set device
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -61,11 +67,11 @@ def main(seed=2024):
     train_id = np.random.default_rng(2024).choice(len(X), int(np.floor(0.8 * len(X))), replace=False)
     test_id = np.setdiff1d(np.arange(len(X)), train_id)
     
-    train_x = X[train_id, :].contiguous().to(device)
-    train_y = y[train_id].contiguous().to(device)
+    train_x = X[train_id, :].contiguous()#.to(device)
+    train_y = y[train_id].contiguous()#.to(device)
     
-    test_x = X[test_id, :].contiguous().to(device)
-    test_y = y[test_id].contiguous().to(device)
+    test_x = X[test_id, :].contiguous()#.to(device)
+    test_y = y[test_id].contiguous()#.to(device)
     
     train_dataset = TensorDataset(train_x, train_y)
     train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True)
@@ -108,9 +114,7 @@ def main(seed=2024):
             return MultivariateQExponential(mean_x, covar_x, power=self.power)
     
     # define the main model
-    hidden_features = [10]
-    
-    class DirichletDeepQEP(DeepQEP):
+    class clsDeepQEP(DeepQEP):
         def __init__(self, in_features, out_features, hidden_features=2, likelihood=None):
             super().__init__()
             if isinstance(hidden_features, int):
@@ -134,40 +138,34 @@ def main(seed=2024):
                 output = self.layers[i](output)
             return output
         
-        def predict(self, test_x):
+        def predict(self, test_loader):
+            correct = 0
+            lls, aucs = [], []
             with torch.no_grad():
+                for x_batch, y_batch in test_loader:
+                    if torch.cuda.is_available():
+                        x_batch, y_batch = x_batch.cuda(), y_batch.cuda()
+                    test_dist = model(x_batch)
+                    pred_means = test_dist.mean.mean(0)
+                    col_max, pred = torch.max(pred_means,-1)
+                    correct += pred.eq(y_batch).cpu().sum()
+                    batch_targets = model.likelihood._prepare_targets(y_batch, num_classes=model.likelihood.num_classes)[1]
+                    ll = model.likelihood.log_marginal(batch_targets, test_dist).mean(0).cpu()
+                    if model.likelihood.miu: ll = ll.reshape(1)
+                    lls.append(ll)
+                    y_score = torch.exp(pred_means[:,torch.unique(y_batch)] - col_max[:,None]) if model.likelihood.num_classes>2 else pred_means[torch.arange(y_batch.size(0)),pred][:,None]
+                    if y_score.size(1)>1: y_score /= y_score.sum(1,keepdims=True)
+                    if model.likelihood.num_classes>2:
+                        aucs.append(roc_auc_score(y_batch.cpu(), y_score.cpu(), multi_class='ovo'))
+                    else:
+                        aucs.append(roc_auc_score(y_batch.cpu(), y_score.cpu()))
+            return correct, np.stack(aucs), torch.cat(lls, 0)
     
-                # The output of the model is a multitask MVN, where both the data points
-                # and the tasks are jointly distributed
-                # To compute the marginal predictive NLL of each data point,
-                # we will call `to_data_independent_dist`,
-                # which removes the data cross-covariance terms from the distribution.
-                preds = model.likelihood(model(test_x)).to_data_independent_dist()
-    
-            return preds.mean.mean(0), preds.variance.mean(0)
-    
-    
+    hidden_features = [10]
     # we let the DirichletClassificationLikelihood compute the targets for us
-    likelihood = MultitaskQExponentialDirichletClassificationLikelihood(train_y, learn_additional_noise=True, power=torch.tensor(POWER))
+    likelihood = MultitaskQExponentialDirichletClassificationLikelihood(train_y, learn_additional_noise=True, power=torch.tensor(POWER), miu=False)
     likelihood.has_global_noise = True
-    def _prepare_targets(targets, alpha_epsilon= 0.01, dtype=torch.float, num_classes=None):
-            if num_classes is None:
-                num_classes = int(targets.max() + 1)
-            # set alpha = \alpha_\epsilon
-            alpha = alpha_epsilon * torch.ones(targets.shape[-1], num_classes, device=targets.device, dtype=dtype)
-    
-            # alpha[class_labels] = 1 + \alpha_\epsilon
-            alpha[torch.arange(len(targets)), targets] = alpha[torch.arange(len(targets)), targets] + 1.0
-    
-            # sigma^2 = log(1 / alpha + 1)
-            sigma2_i = torch.log(alpha.reciprocal() + 1.0)
-    
-            # y = log(alpha) - 0.5 * sigma^2
-            transformed_targets = alpha.log() - 0.5 * sigma2_i
-    
-            return sigma2_i.transpose(-2, -1).type(dtype), transformed_targets.type(dtype), num_classes
-    likelihood._prepare_targets = _prepare_targets
-    model = DirichletDeepQEP(in_features=train_x.shape[-1], out_features=likelihood.num_classes, hidden_features=hidden_features, likelihood=likelihood)
+    model = clsDeepQEP(in_features=train_x.shape[-1], out_features=likelihood.num_classes, hidden_features=hidden_features, likelihood=likelihood)
     # set device
     model = model.to(device)
     
@@ -200,7 +198,7 @@ def main(seed=2024):
             output = model(x_batch)
             correct_i += output.mean.mean(0).argmax(-1).eq(y_batch).cpu().sum()
             # Calc loss and backprop gradients
-            loss = -mll(output, model.likelihood._prepare_targets(y_batch, num_classes=likelihood.num_classes)[1]).sum()
+            loss = -mll(output, model.likelihood._prepare_targets(y_batch, num_classes=model.likelihood.num_classes)[1]).sum()
             loss.backward()
             # if i % 5 == 0:
             #     print('Iter %d/%d - Loss: %.3f last layer lengthscale: %.3f   noise: %.3f   accuracy: %.4f' % (
@@ -233,26 +231,9 @@ def main(seed=2024):
     model.eval()
     # likelihood.eval()
     
-    from sklearn.metrics import roc_auc_score
-    correct = 0
-    lls = []
-    aucs = []
-    with gpytorch.settings.fast_pred_var(), torch.no_grad():
-        for x_batch, y_batch in test_loader:
-            if torch.cuda.is_available():
-                x_batch, y_batch = x_batch.cuda(), y_batch.cuda()
-            test_dist = model(x_batch)
-            pred_means = test_dist.mean.mean(0)
-            col_max, pred = torch.max(pred_means,-1)
-            correct += pred.eq(y_batch).cpu().sum()
-            lls.append(model.likelihood.log_marginal(y_batch[:,None], test_dist).mean(0).cpu())
-            y_score = torch.exp(pred_means[:,torch.unique(y_batch)] - col_max[:,None]) if model.likelihood.num_classes>2 else pred_means[torch.arange(y_batch.size(0)),pred][:,None]
-            if y_score.size(1)>1: y_score /= y_score.sum(1,keepdims=True)
-            if model.likelihood.num_classes>2:
-                aucs.append(roc_auc_score(y_batch.cpu(), y_score.cpu(), multi_class='ovo'))
-            else:
-                aucs.append(roc_auc_score(y_batch.cpu(), y_score.cpu()))
-    lls = torch.cat(lls, 0);  aucs = np.stack(aucs)
+    # from sklearn.metrics import roc_auc_score
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        correct, aucs, lls = model.predict(test_loader)
     NLL = -lls.mean().item()
     ACC = correct / float(len(test_loader.dataset))
     AUC = aucs.mean().item()

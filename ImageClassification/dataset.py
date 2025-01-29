@@ -33,21 +33,21 @@ def dataset(dataset_name='mnist', seed=2024, batch_size=1024, full_fledged=False
     
     elif dataset_name=='cifar10':
         # load data
-        # # normalize = transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761])
+        normalize = transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761])
         # normalize = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)) #(0.2023, 0.1994, 0.2010))
-        # aug_trans = [transforms.RandomCrop(32, padding=4), transforms.RandomHorizontalFlip()]
-        # common_trans = [transforms.ToTensor(), normalize]
-        # train_compose = transforms.Compose(common_trans)# + aug_trans)
-        # test_compose = transforms.Compose(common_trans)
-        # train_dataset = datasets.CIFAR10('./data/CIFAR10', train=True, download=True, transform=train_compose)
-        # test_dataset = datasets.CIFAR10('./data/CIFAR10', train=False, download=True, transform=test_compose)
+        aug_trans = [transforms.RandomCrop(32, padding=4), transforms.RandomHorizontalFlip()]
+        common_trans = [transforms.ToTensor(), normalize]
+        train_compose = transforms.Compose(aug_trans + common_trans)
+        test_compose = transforms.Compose(common_trans)
+        train_dataset = datasets.CIFAR10('./data/CIFAR10', train=True, download=True, transform=train_compose)
+        test_dataset = datasets.CIFAR10('./data/CIFAR10', train=False, download=True, transform=test_compose)
         # download dataset
-        datasets.utils.download_url("https://s3.amazonaws.com/fast-ai-imageclas/cifar10.tgz", './data')
-        import tarfile
-        with tarfile.open('./data/cifar10.tgz', 'r:gz') as tar:
-            tar.extractall(path='./data')
-        train_dataset = datasets.ImageFolder('./data/cifar10/train', transform=transforms.ToTensor())
-        test_dataset = datasets.ImageFolder('./data/cifar10/test', transform=transforms.ToTensor())
+        # datasets.utils.download_url("https://s3.amazonaws.com/fast-ai-imageclas/cifar10.tgz", './data')
+        # import tarfile
+        # with tarfile.open('./data/cifar10.tgz', 'r:gz') as tar:
+        #     tar.extractall(path='./data')
+        # train_dataset = datasets.ImageFolder('./data/cifar10/train', transform=transforms.ToTensor())
+        # test_dataset = datasets.ImageFolder('./data/cifar10/test', transform=transforms.ToTensor())
         # batch_size = 1024
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)

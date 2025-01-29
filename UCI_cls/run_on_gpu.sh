@@ -3,7 +3,7 @@
 #SBATCH -N 1            # number of nodes
 #SBATCH -c 1            # number of cores 
 #SBATCH --mem=64G       # amount of RAM requested in GiB (2^40)
-#SBATCH -t 0-02:00:00   # time in d-hh:mm:ss
+#SBATCH -t 0-10:00:00   # time in d-hh:mm:ss
 #SBATCH -p general      # partition 
 #SBATCH -q public       # QOS
 #SBATCH --gres=gpu:a100:1    # number of Request GPUs
@@ -22,9 +22,17 @@
 source ${HOME}/miniconda3/bin/activate pytorch
 
 # go to working directory
-cd ~/Projects/Deep-QEP/code/CT
+cd ~/Projects/Deep-QEP/code/UCI_cls
 
 # run python script
+if [ $# -eq 0 ]; then
+	dataset_name='elevators'
+elif [ $# -eq 1 ]; then
+	dataset_name="$1"
+fi
 
-python -u run_Deep_GP.py #> Deep_GP.log &
-# sbatch --job-name=DeepGP --output=Deep_GP.log CT_DGP_gpu.sh
+for alg in 'Deep_GP' 'Deep_QEP' 'DKL_GP' 'DSPP'
+do
+	echo "Running ${alg} on dataset ${dataset_name} ..."
+	python -u run_${alg}.py ${dataset_name}
+done

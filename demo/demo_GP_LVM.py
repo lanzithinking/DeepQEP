@@ -138,36 +138,54 @@ for i in iterator:
 
 
 # plot results
-
 inv_lengthscale = 1 / model.covar_module.base_kernel.lengthscale
 values, indices = torch.topk(model.covar_module.base_kernel.lengthscale, k=2,largest=False)
-
 l1 = indices.numpy().flatten()[0]
 l2 = indices.numpy().flatten()[1]
-
-plt.figure(figsize=(20, 7))
-colors = ['r', 'b', 'g']
-
-plt.subplot(131)
 X = model.X.q_mu.detach().numpy()
 std = torch.nn.functional.softplus(model.X.q_log_sigma).detach().numpy()
-plt.title('2d latent subspace corresponding to 3 phase oilflow')
-plt.xlabel('Latent dim 1')
-plt.ylabel('Latent dim 2')
+labels = labels.numpy()
 
-# Select index of the smallest lengthscales by examining model.covar_module.base_kernel.lengthscales
+# # plot
+# plt.figure(figsize=(20, 7))
+colors = ['r', 'b', 'g']
+#
+# plt.subplot(131)
+# # Select index of the smallest lengthscales by examining model.covar_module.base_kernel.lengthscales
+# for i, label in enumerate(np.unique(labels)):
+#     X_i = X[labels == label]
+#     scale_i = std[labels == label]
+#     plt.scatter(X_i[:, l1], X_i[:, l2], c=[colors[i]], label=label)
+#     plt.errorbar(X_i[:, l1], X_i[:, l2], xerr=scale_i[:,l1], yerr=scale_i[:,l2], label=label,c=colors[i], fmt='none')
+# plt.title('2d latent subspace corresponding to 3 phase oilflow')
+# plt.xlabel('Latent dim 1')
+# plt.ylabel('Latent dim 2')
+#
+# plt.subplot(132)
+# plt.bar(np.arange(latent_dim), height=inv_lengthscale.detach().numpy().flatten())
+# plt.title('Inverse Lengthscale with SE-ARD kernel')
+#
+# plt.subplot(133)
+# plt.plot(loss_list, label='batch_size=100')
+# plt.title('Neg. ELBO Loss')
+# # plt.show()
+# plt.savefig('./demo_GP-LVM.png',bbox_inches='tight')
+
+
+plt.figure(figsize=(7, 6))
 for i, label in enumerate(np.unique(labels)):
     X_i = X[labels == label]
     scale_i = std[labels == label]
     plt.scatter(X_i[:, l1], X_i[:, l2], c=[colors[i]], label=label)
     plt.errorbar(X_i[:, l1], X_i[:, l2], xerr=scale_i[:,l1], yerr=scale_i[:,l2], label=label,c=colors[i], fmt='none')
+plt.title('q = 2.0 (Gaussian)', fontsize=25)
+plt.xlabel('Latent dim 1', fontsize=20)
+plt.ylabel('Latent dim 2', fontsize=20)
+plt.tick_params(axis='both', which='major', labelsize=15)
+plt.savefig('./oilflow_latent_GP-LVM.png',bbox_inches='tight')
 
-plt.subplot(132)
-plt.bar(np.arange(latent_dim), height=inv_lengthscale.detach().numpy().flatten())
-plt.title('Inverse Lengthscale with SE-ARD kernel')
-
-plt.subplot(133)
-plt.plot(loss_list, label='batch_size=100')
-plt.title('Neg. ELBO Loss')
-# plt.show()
-plt.savefig('./demo_GP-LVM.png',bbox_inches='tight')
+plt.figure(figsize=(7, 6))
+plt.bar(np.arange(latent_dim), height=inv_lengthscale.detach().cpu().numpy().flatten())
+plt.title('Inverse Lengthscale of kernel', fontsize=25)
+plt.tick_params(axis='both', which='major', labelsize=15)
+plt.savefig('./oilflow_latdim_GP-LVM.png',bbox_inches='tight')

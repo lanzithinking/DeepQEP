@@ -2,8 +2,8 @@
 
 #SBATCH -N 1            # number of nodes
 #SBATCH -c 1            # number of cores 
-#SBATCH --mem=64G       # amount of RAM requested in GiB (2^40)
-#SBATCH -t 0-12:00:00   # time in d-hh:mm:ss
+#SBATCH --mem=128G       # amount of RAM requested in GiB (2^40)
+#SBATCH -t 0-02:00:00   # time in d-hh:mm:ss
 #SBATCH -p general      # partition 
 #SBATCH -q public       # QOS
 #SBATCH --gres=gpu:a100:1    # number of Request GPUs
@@ -22,35 +22,14 @@
 source ${HOME}/miniconda3/bin/activate pytorch
 
 # go to working directory
-cd ~/Projects/Deep-QEP/code/ImageClassification
+cd ~/Projects/Deep-QEP/code/CT
 
 # run python script
 if [ $# -eq 0 ]; then
-	likelihood='dirichlet'
-	dataset_name='mnist'
-	batch_size=128
-	seed_NO=2024
+	n_angles=90
 elif [ $# -eq 1 ]; then
-	likelihood="$1"
-	dataset_name='mnist'
-	batch_size=128
-	seed_NO=2024
-elif [ $# -eq 2 ]; then
-	likelihood="$1"
-	dataset_name="$2"
-	batch_size=128
-	seed_NO=2024
-elif [ $# -eq 3 ]; then
-	likelihood="$1"
-	dataset_name="$2"
-	batch_size="$3"
-	seed_NO=2024
-elif [ $# -eq 4 ]; then
-	likelihood="$1"
-	dataset_name="$2"
-	batch_size="$3"
-	seed_NO="$4"
+	n_angles="$1"
 fi
 
-python -u run_Deep_GP_${likelihood}.py ${dataset_name} ${batch_size} ${seed_NO} #> Deep_GP.log &
-# sbatch --job-name=DeepGP --output=Deep_GP.log run_DGP_gpu.sh
+python -u run_QEP_LVM.py ${n_angles} #> QEP_LVM.log &
+# sbatch --job-name=QEPLVM --output=QEP_LVM.log run_QEPLVM_gpu.sh

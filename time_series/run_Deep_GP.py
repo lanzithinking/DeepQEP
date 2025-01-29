@@ -175,21 +175,21 @@ def main(seed=2024):
     ], -1)
     MAE = torch.mean(torch.abs(mean-test_y))
     RMSE = torch.mean(torch.pow(mean-test_y, 2)).sqrt()
-    STD = torch.mean(var.sqrt()).item()
+    PSD = torch.mean(var.sqrt()).item()
     NLL = -model.likelihood.log_marginal(test_y, mdl_output).mean(0).mean().item()
     from sklearn.metrics import r2_score
     R2 = r2_score(test_y, mean)
     print('Test MAE: {}'.format(MAE))
     print('Test RMSE: {}'.format(RMSE))
-    print('Test STD: {}'.format(STD))
+    print('Test PSD: {}'.format(PSD))
     print('Test R2: {}'.format(R2))
     print('Test NLL: {}'.format(NLL))
     
     # save to file
     os.makedirs('./results', exist_ok=True)
-    stats = np.array([MAE, RMSE, STD, R2, NLL, time_])
+    stats = np.array([MAE, RMSE, PSD, R2, NLL, time_])
     stats = np.array([seed,'DeepGP']+[np.array2string(r, precision=4) for r in stats])[None,:]
-    header = ['seed', 'Method', 'MAE', 'RMSE', 'STD', 'R2', 'NLL', 'time']
+    header = ['seed', 'Method', 'MAE', 'RMSE', 'PSD', 'R2', 'NLL', 'time']
     f_name = os.path.join('./results/ts_DeepGP_'+str(model.num_layers)+'layers.txt')
     with open(f_name,'ab') as f_:
         np.savetxt(f_,stats,fmt="%s",delimiter=',',header=','.join(header) if seed==2024 else '')

@@ -25,6 +25,11 @@ source ${HOME}/miniconda3/bin/activate pytorch
 cd ~/Projects/Deep-QEP/code/CT
 
 # run python script
+if [ $# -eq 0 ]; then
+	n_angles=90
+elif [ $# -eq 1 ]; then
+	n_angles="$1"
+fi
 
-python -u run_GP_LVM.py #> GP_LVM.log &
-# sbatch --job-name=GPLVM --output=GP_LVM.log CT_GPLVM_gpu.sh
+python -u run_GP_LVM.py ${n_angles} #> GP_LVM.log &
+# sbatch --job-name=GPLVM --output=GP_LVM.log run_GPLVM_gpu.sh

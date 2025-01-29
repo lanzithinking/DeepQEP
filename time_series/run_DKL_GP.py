@@ -53,10 +53,6 @@ def main(seed=2024):
     torch.use_deterministic_algorithms(True)
 
     # define the NN feature extractor
-    data_dim = train_x.size(-1)
-    num_features = train_y.size(-1)
-    hidden_features = [100, 50]
-    
     class FeatureExtractor(torch.nn.Sequential):
         def __init__(self, in_features, out_features, hidden_features=2):
             super(FeatureExtractor, self).__init__()
@@ -72,6 +68,9 @@ def main(seed=2024):
             self.num_layers = len(layers)
             self.layers = torch.nn.Sequential(*layers)
     
+    data_dim = train_x.size(-1)
+    num_features = train_y.size(-1)
+    hidden_features = [100, 50]
     feature_extractor = FeatureExtractor(in_features=data_dim, out_features=num_features, hidden_features=hidden_features)
     
     
@@ -144,7 +143,7 @@ def main(seed=2024):
                 # To compute the marginal predictive NLL of each data point,
                 # we will call `to_data_independent_dist`,
                 # which removes the data cross-covariance terms from the distribution.
-                preds = model.likelihood(output).to_data_independent_dist()
+                preds = self.likelihood(output).to_data_independent_dist()
     
             # return preds.mean.mean(0), preds.variance.mean(0)
             return preds.mean, preds.variance, output
@@ -197,21 +196,21 @@ def main(seed=2024):
     ], -1)
     MAE = torch.mean(torch.abs(mean-test_y)).item()
     RMSE = torch.mean(torch.pow(mean-test_y, 2)).sqrt().item()
-    STD = torch.mean(var.sqrt()).item()
+    PSD = torch.mean(var.sqrt()).item()
     NLL = -model.likelihood.log_marginal(test_y, mdl_output).mean(0).mean().item()
     from sklearn.metrics import r2_score
     R2 = r2_score(test_y, mean)
     print('Test MAE: {}'.format(MAE))
     print('Test RMSE: {}'.format(RMSE))
-    print('Test STD: {}'.format(STD))
+    print('Test PSD: {}'.format(PSD))
     print('Test R2: {}'.format(R2))
     print('Test NLL: {}'.format(NLL))
     
     # save to file
     os.makedirs('./results', exist_ok=True)
-    stats = np.array([MAE, RMSE, STD, R2, NLL, time_])
+    stats = np.array([MAE, RMSE, PSD, R2, NLL, time_])
     stats = np.array([seed,'DKLGP']+[np.array2string(r, precision=4) for r in stats])[None,:]
-    header = ['seed', 'Method', 'MAE', 'RMSE', 'STD', 'R2', 'NLL', 'time']
+    header = ['seed', 'Method', 'MAE', 'RMSE', 'PSD', 'R2', 'NLL', 'time']
     f_name = os.path.join('./results/ts_DKLGP_'+str(model.feature_extractor.num_layers)+'layers.txt')
     with open(f_name,'ab') as f_:
         np.savetxt(f_,stats,fmt="%s",delimiter=',',header=','.join(header) if seed==2024 else '')

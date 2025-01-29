@@ -205,7 +205,7 @@ class MultitaskQExponentialLikelihood(_MultitaskQExponentialLikelihoodBase):
     ) -> None:
         super(Likelihood, self).__init__()  # pyre-ignore[20]
         self.power = kwargs.pop('power', torch.tensor(2.0))
-        self.miu = kwargs.pop('miu', True) # marginally identical but uncorrelated
+        self.miu = kwargs.pop('miu', False) # marginally identical but uncorrelated
         if noise_constraint is None:
             noise_constraint = GreaterThan(1e-4)
 
@@ -464,9 +464,9 @@ class MultitaskQExponentialDirichletClassificationLikelihood(MultitaskFixedNoise
     """
 
     def _prepare_targets(
-        self, targets: Tensor, alpha_epsilon: float = 0.01, dtype: torch.dtype = torch.float
+        self, targets: Tensor, num_classes: Optional = None, alpha_epsilon: float = 0.01, dtype: torch.dtype = torch.float
     ) -> Tuple[Tensor, Tensor, int]:
-        num_classes = int(targets.max() + 1)
+        if num_classes is None: num_classes = int(targets.max() + 1)
         # set alpha = \alpha_\epsilon
         alpha = alpha_epsilon * torch.ones(targets.shape[-1], num_classes, device=targets.device, dtype=dtype)
 

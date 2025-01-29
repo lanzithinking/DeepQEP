@@ -26,15 +26,31 @@ cd ~/Projects/Deep-QEP/code/ImageClassification
 
 # run python script
 if [ $# -eq 0 ]; then
+	likelihood='dirichlet'
 	dataset_name='mnist'
-	likelihood='dirichlet'
+	batch_size=128
+	seed_NO=2024
 elif [ $# -eq 1 ]; then
-	dataset_name="$1"
-	likelihood='dirichlet'
+	likelihood="$1"
+	dataset_name='mnist'
+	batch_size=128
+	seed_NO=2024
 elif [ $# -eq 2 ]; then
-	dataset_name="$1"
-	likelihood="$2"
+	likelihood="$1"
+	dataset_name="$2"
+	batch_size=128
+	seed_NO=2024
+elif [ $# -eq 3 ]; then
+	likelihood="$1"
+	dataset_name="$2"
+	batch_size="$3"
+	seed_NO=2024
+elif [ $# -eq 4 ]; then
+	likelihood="$1"
+	dataset_name="$2"
+	batch_size="$3"
+	seed_NO="$4"
 fi
 
-python -u run_Deep_QEP_${likelihood}.py ${dataset_name} #> Deep_QEP.log &
+python -u run_Deep_QEP_${likelihood}.py ${dataset_name} ${batch_size} ${seed_NO} #> Deep_QEP.log &
 # sbatch --job-name=DeepQEP --output=Deep_QEP.log run_DQEP_gpu.sh
