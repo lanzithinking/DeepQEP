@@ -251,7 +251,9 @@ class MultivariateQExponential(TMultivariateNormal, Distribution):
                 covar_root = covar_base.root_decomposition().root
             
             base_samples = self.get_base_samples(torch.Size([num_samples]))
-            if len(self.event_shape)==2: base_samples = base_samples.transpose(-1,-2)
+            if len(self.event_shape)==2: # multitask case
+                if not self._interleaved: base_samples = base_samples.transpose(-1,-2)
+                base_samples = base_samples.view(base_samples.shape[:-2] + covar_base.shape[-1:])
             base_samples = base_samples.permute(*range(1,covar_base.dim()),0)
             if covar_root.shape < covar_base.shape: base_samples = base_samples[...,:covar_root.size(-1),:]
             
